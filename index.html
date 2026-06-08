@@ -13,6 +13,8 @@
   @keyframes rise{0%{opacity:0;transform:translate(-50%,-30%) scale(.6)}20%{opacity:1;transform:translate(-50%,-70%) scale(1.1)}100%{opacity:0;transform:translate(-50%,-160%) scale(1)}}
   #bank{position:fixed;top:14px;left:50%;transform:translate(-50%,0);pointer-events:none;display:flex;align-items:center;gap:10px;font-weight:900;font-size:40px;color:#fff;text-shadow:0 3px 0 rgba(0,0,0,.45),0 0 22px rgba(255,205,80,.8)}
   #bank .coin{width:32px;height:32px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff6c2,#ffc83a 55%,#d98a16);box-shadow:0 0 16px rgba(255,200,60,.9),inset 0 -3px 4px rgba(150,80,0,.5)}
+  #bank.bump{animation:bump .26s ease}
+  @keyframes bump{0%{transform:translate(-50%,0) scale(1)}40%{transform:translate(-50%,0) scale(1.18)}100%{transform:translate(-50%,0) scale(1)}}
   .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;color:#eaf6ff;padding:24px;background:radial-gradient(120% 120% at 50% 30%,rgba(30,26,12,.5),rgba(8,9,16,.92))}
   .screen h1{font-size:clamp(32px,8.5vw,62px);font-weight:900;letter-spacing:2px;background:linear-gradient(180deg,#fff,#ffcf5a);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 40px rgba(255,190,70,.4)}
   .screen p{max-width:440px;font-size:16px;line-height:1.5;opacity:.92}.hint{font-size:13px;opacity:.6}
@@ -167,8 +169,22 @@ const UP={bladeHalf:1.6,reach:2.7,move:10,mult:1};
 const state={phase:'start',bank:0,heading:0,driving:false,speedNow:0,shake:0};
 function fmt(n){n=Math.round(n);if(n>=1e9)return(n/1e9).toFixed(2)+'B';if(n>=1e6)return(n/1e6).toFixed(2)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'k';return''+n;}
 const elBank=document.getElementById('bankNum'),elFx=document.getElementById('fx');
-function updateBank(){elBank.textContent=fmt(state.bank);}
+let _bankShown=0;
+function updateBank(){elBank.textContent=fmt(state.bank);if(state.bank>_bankShown){_bankShown=state.bank;elBank.classList.remove('bump');void elBank.offsetWidth;elBank.classList.add('bump');}}
 function popup(world,text,color){const v=world.clone().project(camera);if(v.z>1)return;const el=document.createElement('div');el.className='pop';el.textContent=text;el.style.color=color;el.style.left=((v.x*.5+.5)*innerWidth)+'px';el.style.top=((-v.y*.5+.5)*innerHeight)+'px';elFx.appendChild(el);setTimeout(()=>el.remove(),820);}
+
+/* JUICE: частицы (пыль/искры) — пул спрайтов с мягкой текстурой */
+const ptTex=(function(){const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');const gr=x.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.5,'rgba(255,255,255,.5)');gr.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=gr;x.fillRect(0,0,64,64);return new THREE.CanvasTexture(c);})();
+const PT=[];for(let i=0;i<80;i++){const s=new THREE.Sprite(new THREE.SpriteMaterial({map:ptTex,transparent:true,depthWrite:false,opacity:0}));s.visible=false;scene.add(s);PT.push({s,life:0,max:1,vx:0,vy:0,vz:0,grav:0,s0:1,s1:1,fade:1});}
+let ptHead=0;
+function emit(x,y,z,o){const p=PT[ptHead];ptHead=(ptHead+1)%PT.length;p.life=p.max=o.life;p.vx=o.vx||0;p.vy=o.vy||0;p.vz=o.vz||0;p.grav=o.grav||0;p.s0=o.size;p.s1=o.size1||o.size;p.fade=o.fade||1;
+  p.s.visible=true;p.s.position.set(x,y,z);p.s.material.color.setHex(o.color);p.s.material.opacity=o.fade;p.s.material.blending=o.add?THREE.AdditiveBlending:THREE.NormalBlending;p.s.scale.setScalar(o.size);}
+function updateParticles(dt){for(const p of PT){if(p.life<=0)continue;p.life-=dt;if(p.life<=0){p.s.visible=false;continue;}
+  p.vy-=p.grav*dt;p.s.position.x+=p.vx*dt;p.s.position.y+=p.vy*dt;p.s.position.z+=p.vz*dt;
+  const t=p.life/p.max;p.s.material.opacity=t*p.fade;p.s.scale.setScalar(p.s0+(p.s1-p.s0)*(1-t));}}
+function emitDust(){const f=Math.sin(state.heading),cf=Math.cos(state.heading);const bx=dozer.position.x-f*1.6,bz=dozer.position.z-cf*1.6; // за гусеницами
+  for(const sx of [-0.9,0.9]){emit(bx+cf*sx+(rnd()-.5)*.3,.18,bz-f*sx+(rnd()-.5)*.3,{color:0xb8b2c6,life:.55,size:.5,size1:1.3,vy:.5,grav:.4,vx:(rnd()-.5)*.6,vz:(rnd()-.5)*.6,fade:.55});}}
+function emitSparks(x,z,n){for(let k=0;k<n;k++){const a=rnd()*6.28,sp=2+rnd()*3;emit(x+(rnd()-.5)*1.5,.4,z+(rnd()-.5)*1.5,{color:0xffd86a,life:.4+rnd()*.2,size:.45,size1:.1,add:true,vy:2.5+rnd()*2,grav:7,vx:Math.cos(a)*sp,vz:Math.sin(a)*sp,fade:1});}}
 
 function setupWorld(){
   for(let i=0;i<N;i++){if(i<900)placeAtSource(i);else{C[i].st='free';free.push(i);hide(i);}}
@@ -214,8 +230,8 @@ function stepPush(dt){
     for(let i=0;i<N;i++){const o=C[i];if(o.st==='free')continue;
       if(Math.abs(o.x-p.x)<p.half&&Math.abs(o.z-p.z)<p.half){if(o.st==='rest')stackH[o.cell]=Math.max(0,stackH[o.cell]-1);
         const v=o.worth*UP.mult;p.fill+=v;state.bank+=v;cnt++;placeAtSource(i);}}
-    if(cnt>0){pendingClinks+=Math.min(6,cnt);
-      if(p.fill>=p.cost){p.fill=0;p.level++;p.cost=Math.round(p.cost*p.grow);p.apply();chime('upgrade');state.shake+=0.3;drawLabel(p.lbl,p.name+' '+p.level,fmt(p.cost),'#aef0c0');p.ghost.scale.setScalar(1+p.level*0.06);}}
+    if(cnt>0){pendingClinks+=Math.min(6,cnt);emitSparks(p.x,p.z,Math.min(8,cnt));
+      if(p.fill>=p.cost){p.fill=0;p.level++;p.cost=Math.round(p.cost*p.grow);p.apply();chime('upgrade');state.shake+=0.34;emitSparks(p.x,p.z,22);drawLabel(p.lbl,'UPGRADE',p.name+' '+fmt(p.cost),'#aef0c0');p.ghost.scale.setScalar(1+p.level*0.06);}}
     {const r=Math.max(0.001,Math.min(1,p.fill/p.cost));p.fillBar.scale.y=r;p.fillBar.position.y=p.BOT+p.GH*r*0.5;}}
   for(const g of gates){const a=state.bank>=g.cost;if(a!==g.active){g.active=a;g.red.visible=!a;g.white.visible=a;}} // red(locked)->white(active)
   mesh.instanceMatrix.needsUpdate=true;updateBank();
@@ -265,13 +281,15 @@ function simStep(dt){
   dozer.rotation.y=state.heading;dozer.position.y=Math.sin(simTime*20)*0.02*Math.min(1,state.speedNow/3);
   if(engineGain&&!muted)engineGain.gain.value=0.02+Math.min(0.1,state.speedNow*0.012);
   stepPush(dt);pumpClinks(dt);
+  if(state.speedNow>3.5&&rnd()<0.6)emitDust();updateParticles(dt);
 }
 function updateCamera(dt){
   shadow.position.set(dozer.position.x,0.04,dozer.position.z);
   state.shake*=Math.pow(0.0001,dt);const sh=state.shake;
   const a=CFG.camYaw,ca=Math.cos(a),sa=Math.sin(a);          // поворот вокруг Y: смещение и точка взгляда
-  const ox=CFG.camBack*sa,oz=-CFG.camBack*ca,lx=-CFG.lookAhead*sa,lz=CFG.lookAhead*ca;
-  camera.position.set(dozer.position.x+ox+(rnd()-.5)*sh,CFG.camHeight+(rnd()-.5)*sh,dozer.position.z+oz);
+  const sp=Math.min(1,state.speedNow/UP.move),back=CFG.camBack+sp*0.8,hgt=CFG.camHeight+sp*0.5; // лёгкий зум-аут по скорости
+  const ox=back*sa,oz=-back*ca,lx=-CFG.lookAhead*sa,lz=CFG.lookAhead*ca;
+  camera.position.set(dozer.position.x+ox+(rnd()-.5)*sh,hgt+(rnd()-.5)*sh,dozer.position.z+oz);
   camera.lookAt(dozer.position.x+lx,0,dozer.position.z+lz);
 }
 function renderFrame(){if(usePost)renderPost();else renderer.render(scene,camera);}
