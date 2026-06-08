@@ -148,16 +148,19 @@ function addGate(x,z,rot,mult,cost){const g=new THREE.Group();g.position.set(x,0
   const b=new THREE.Mesh(new THREE.PlaneGeometry(4.6,2.3),new THREE.MeshBasicMaterial({map:bannerTex(String(cost)),transparent:true,side:THREE.DoubleSide,depthWrite:false}));b.position.set(0,10.4,0);b.rotation.y=Math.PI;g.add(b);
   gates.push({x,z,n:new THREE.Vector3(Math.sin(rot),0,Math.cos(rot)),right:new THREE.Vector3(Math.cos(rot),0,-Math.sin(rot)),mult,cost,active:false,red:redM,white:whiteM,halfW:2.8});}
 const pads=[];
-function makeLabel(){const c=document.createElement('canvas');c.width=256;c.height=128;const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true}));spr.userData.c=c;spr.scale.set(3.6,1.8,1);return spr;}
-function drawLabel(spr,top,bottom,col){const c=spr.userData.c,x=c.getContext('2d');x.clearRect(0,0,256,128);x.fillStyle=col||'#fff';x.font='900 60px Trebuchet MS,sans-serif';x.textAlign='center';x.textBaseline='middle';x.shadowColor='rgba(0,0,0,.5)';x.shadowBlur=8;x.fillText(top,128,44);x.font='900 44px Trebuchet MS,sans-serif';x.fillStyle='#ffe27a';x.fillText(bottom,128,96);spr.material.map.needsUpdate=true;}
+function makeLabel(){const c=document.createElement('canvas');c.width=256;c.height=128;const m=new THREE.Mesh(new THREE.PlaneGeometry(4.2,2.1),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),transparent:true,side:THREE.DoubleSide,depthWrite:false}));m.userData.c=c;return m;}
+function drawLabel(spr,top,bottom,col){const c=spr.userData.c,x=c.getContext('2d');x.clearRect(0,0,256,128);x.fillStyle=col||'#fff';x.font='900 58px Trebuchet MS,sans-serif';x.textAlign='center';x.textBaseline='middle';x.shadowColor='rgba(0,0,0,.5)';x.shadowBlur=8;x.fillText(top,128,42);x.font='900 40px Trebuchet MS,sans-serif';x.fillStyle='#ffe27a';x.fillText(bottom,128,94);spr.material.map.needsUpdate=true;}
 function addPad(x,z,name,cost,apply){const g=new THREE.Group();g.position.set(x,0,z);scene.add(g);
-  box(4.4,.3,4.4,new THREE.MeshStandardMaterial({color:0x4a3a7a,roughness:.8,emissive:0x180a30,emissiveIntensity:.4}),0,.15,0,g);
-  const gm=new THREE.MeshStandardMaterial({color:0xffffff,transparent:true,opacity:.5,roughness:.6,emissive:0x444444});const ghost=new THREE.Group();
-  box(1.2,.7,1.6,gm,0,.7,0,ghost);box(.9,.6,.8,gm,0,1.25,-.3,ghost);box(1.6,.6,.25,gm,0,.55,.95,ghost);g.add(ghost);
-  const fill=new THREE.Mesh(new THREE.BoxGeometry(3.6,.4,.06),new THREE.MeshBasicMaterial({color:0xffd84a}));fill.position.set(0,2.7,2.0);fill.scale.x=0.001;g.add(fill);
-  box(3.6,.4,.04,new THREE.MeshStandardMaterial({color:0x111111,transparent:true,opacity:.5}),0,2.7,1.98,g);
-  const lbl=makeLabel();lbl.position.set(0,3.5,0);g.add(lbl);
-  const pad={x,z,half:2.3,name,cost,fill:0,level:0,grow:1.8,apply,ghost,fillBar:fill,lbl};drawLabel(lbl,name,fmt(cost),'#fff');pads.push(pad);}
+  box(5.0,.16,5.0,new THREE.MeshStandardMaterial({color:0xf2c63a,roughness:.6,emissive:0x4a3a00,emissiveIntensity:.2}),0,.08,0,g); // жёлтый въездной мат
+  box(4.2,.2,4.2,new THREE.MeshStandardMaterial({color:0x3a2f63,roughness:.85}),0,.12,0,g);                                     // тёмная вставка
+  box(4.8,3.4,1.1,new THREE.MeshStandardMaterial({color:0x6a4cc0,roughness:.5,emissive:0x1e1050,emissiveIntensity:.4}),0,1.7,3.0,g); // задняя стойка
+  const GH=3.0,BOT=0.25;                                  // стекло-шкала: низ фиксирован, тянется вверх
+  box(3.6,GH,.5,new THREE.MeshStandardMaterial({color:0x123040,transparent:true,opacity:.32,roughness:.4}),0,BOT+GH/2,2.25,g);  // рамка стекла
+  const fill=new THREE.Mesh(new THREE.BoxGeometry(3.3,GH,.55),new THREE.MeshBasicMaterial({color:0x35d8e6,transparent:true,opacity:.82,blending:THREE.AdditiveBlending,depthWrite:false}));fill.position.set(0,BOT+0.001,2.3);fill.scale.y=0.001;g.add(fill);
+  const gm=new THREE.MeshStandardMaterial({color:0xffffff,transparent:true,opacity:.5,roughness:.6,emissive:0x444444});const ghost=new THREE.Group(); // призрак-силуэт награды
+  box(1.4,.8,1.9,gm,0,0,0,ghost);box(1.0,.7,.9,gm,0,.6,-.35,ghost);box(1.9,.55,.3,gm,0,-.12,1.05,ghost);ghost.position.set(0,1.3,2.15);g.add(ghost);
+  const lbl=makeLabel();lbl.position.set(0,4.0,2.45);lbl.rotation.y=Math.PI;g.add(lbl);    // надпись лицом к подъезжающему
+  const pad={x,z,half:2.4,name,cost,fill:0,level:0,grow:1.8,apply,ghost,fillBar:fill,lbl,GH,BOT};drawLabel(lbl,'UPGRADE',name+' '+fmt(cost),'#fff');pads.push(pad);}
 
 /* STATE / UPGRADES */
 const UP={bladeHalf:1.6,reach:2.7,move:10,mult:1};
@@ -213,7 +216,7 @@ function stepPush(dt){
         const v=o.worth*UP.mult;p.fill+=v;state.bank+=v;cnt++;placeAtSource(i);}}
     if(cnt>0){pendingClinks+=Math.min(6,cnt);
       if(p.fill>=p.cost){p.fill=0;p.level++;p.cost=Math.round(p.cost*p.grow);p.apply();chime('upgrade');state.shake+=0.3;drawLabel(p.lbl,p.name+' '+p.level,fmt(p.cost),'#aef0c0');p.ghost.scale.setScalar(1+p.level*0.06);}}
-    p.fillBar.scale.x=Math.max(0.001,Math.min(1,p.fill/p.cost));}
+    {const r=Math.max(0.001,Math.min(1,p.fill/p.cost));p.fillBar.scale.y=r;p.fillBar.position.y=p.BOT+p.GH*r*0.5;}}
   for(const g of gates){const a=state.bank>=g.cost;if(a!==g.active){g.active=a;g.red.visible=!a;g.white.visible=a;}} // red(locked)->white(active)
   mesh.instanceMatrix.needsUpdate=true;updateBank();
 }
