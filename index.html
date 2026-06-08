@@ -61,18 +61,26 @@ const CFG={
   for(const[k,v]of QS){if(k in CFG){const n=Number(v);if(!Number.isNaN(n))CFG[k]=n;}}})();
 
 /* AUDIO */
-let AC=null,master=null,engineGain=null,engineOsc=null,muted=false;
+let AC=null,master=null,engineGain=null,muted=false;
 function audioInit(){if(AC){if(AC.state==='suspended')AC.resume();return;}
   AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=0.5;master.connect(AC.destination);
-  // дизель: 2 расстроенные пилы ~72 Гц (замер: гармоники 145/216) + lowpass + tremolo-«чаг»
-  const o1=AC.createOscillator();o1.type='sawtooth';o1.frequency.value=72;
-  const o2=AC.createOscillator();o2.type='sawtooth';o2.frequency.value=72.6;
-  const lp=AC.createBiquadFilter();lp.type='lowpass';lp.frequency.value=340;
-  const trem=AC.createGain();trem.gain.value=1;
-  const lfo=AC.createOscillator();lfo.type='triangle';lfo.frequency.value=9;const lfoG=AC.createGain();lfoG.gain.value=0.35;lfo.connect(lfoG);lfoG.connect(trem.gain);
-  engineGain=AC.createGain();engineGain.gain.value=0;
-  o1.connect(lp);o2.connect(lp);lp.connect(trem);trem.connect(engineGain);engineGain.connect(master);
-  o1.start();o2.start();lfo.start();engineOsc=[o1,o2];}
+  engineGain=AC.createGain();engineGain.gain.value=0.85;engineGain.connect(master);} // шина двигателя; звук = пул putt-импульсов (тарахтенье)
+// одиночный «туп» зажигания: низкий квадрат + механический щелчок "т"
+function putt(t,pitch,amp){
+  const o=AC.createOscillator();o.type='square';o.frequency.value=pitch;
+  const lp=AC.createBiquadFilter();lp.type='lowpass';lp.frequency.value=480;
+  const g=AC.createGain();g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(amp,t+0.004);g.gain.exponentialRampToValueAtTime(0.0006,t+0.07);
+  o.connect(lp);lp.connect(g);g.connect(engineGain);o.start(t);o.stop(t+0.1);
+  const nb=AC.createBuffer(1,120,AC.sampleRate),dd=nb.getChannelData(0);for(let i=0;i<120;i++)dd[i]=(Math.random()*2-1)*Math.pow(1-i/120,4);
+  const ns=AC.createBufferSource();ns.buffer=nb;const bp=AC.createBiquadFilter();bp.type='bandpass';bp.frequency.value=1800;bp.Q.value=1.1;
+  const ng=AC.createGain();ng.gain.value=amp*0.45;ns.connect(bp);bp.connect(ng);ng.connect(engineGain);ns.start(t);}
+let enginePuttNext=0;
+function pumpEngine(){                                  // планировщик «тыр-тыр-тыр»: частота=RPM растёт со скоростью
+  if(!AC||muted||state.phase!=='play')return;
+  const tnow=AC.currentTime,look=0.12,sp=Math.min(1,state.speedNow/UP.move);
+  const rate=5.5+sp*11, pitch=56+sp*10, amp=0.5+sp*0.5;
+  if(enginePuttNext<tnow)enginePuttNext=tnow;
+  while(enginePuttNext<tnow+look){putt(enginePuttNext,pitch+(Math.random()-.5)*2,amp);enginePuttNext+=1/rate;}}
 function clink(){if(!AC||muted)return;const t=AC.currentTime,base=2100+Math.random()*900;
   [[1,.5],[1.5,.22],[2.3,.14],[3.4,.08]].forEach(([r,a])=>{const o=AC.createOscillator();o.type='triangle';o.frequency.value=base*r;
     const g=AC.createGain();const amp=a*(0.5+Math.random()*0.5);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(amp,t+0.002);
@@ -267,7 +275,7 @@ function renderPost(){renderer.setRenderTarget(rtScene);renderer.clear();rendere
 /* FLOW */
 function start(){if(!TEST)audioInit();document.getElementById('start').classList.add('hidden');document.getElementById('bank').classList.remove('hidden');document.getElementById('mute').classList.remove('hidden');setupWorld();state.phase='play';}
 document.getElementById('startBtn').onclick=start;
-document.getElementById('mute').onclick=function(){muted=!muted;this.textContent=muted?'🔇':'🔊';if(engineGain)engineGain.gain.value=muted?0:0.02;};
+document.getElementById('mute').onclick=function(){muted=!muted;this.textContent=muted?'🔇':'🔊';if(engineGain)engineGain.gain.value=muted?0:0.85;};
 
 /* SIM STEP (детерминированный, отделён от rAF) */
 const ctrl={desired:null,moving:false};   // источник управления на текущий шаг
@@ -288,7 +296,7 @@ function simStep(dt){
   state.speedNow+=((ctrl.moving?UP.move:0)-state.speedNow)*Math.min(1,dt*5);
   dozer.position.x+=Math.sin(state.heading)*state.speedNow*dt;dozer.position.z+=Math.cos(state.heading)*state.speedNow*dt;
   dozer.rotation.y=state.heading;dozer.position.y=Math.sin(simTime*20)*0.02*Math.min(1,state.speedNow/3);
-  if(engineGain&&!muted){engineGain.gain.value=0.02+Math.min(0.1,state.speedNow*0.012);if(engineOsc){const p=72+state.speedNow*1.6;engineOsc[0].frequency.value=p;engineOsc[1].frequency.value=p+0.6;}}
+  pumpEngine();
   stepPush(dt);pumpClinks(dt);
   if(state.speedNow>3.5&&rnd()<0.6)emitDust();updateParticles(dt);
 }
