@@ -1,0 +1,13 @@
+{
+  "name": "gold-harvester",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "shoot": "node tools/shoot.mjs",
+    "extract": "bash tools/extract.sh"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

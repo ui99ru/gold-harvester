@@ -1,0 +1,13 @@
+# Служебные директории / артефакты
+.claude/
+node_modules/
+out/
+
+# Корпус кадров (тяжёлый, восстанавливается из demo.mp4 через tools/extract.sh)
+refs/frames/
+refs/strip_sec.png
+
+# OS / редактор
+.DS_Store
+Thumbs.db
+*.log
