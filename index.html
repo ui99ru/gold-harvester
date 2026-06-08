@@ -133,19 +133,20 @@ function bannerTex(text){const c=document.createElement('canvas');c.width=256;c.
   x.moveTo(12+r,18);x.arcTo(244,18,244,110,r);x.arcTo(244,110,12,110,r);x.arcTo(12,110,12,18,r);x.arcTo(12,18,244,18,r);x.closePath();x.fill();x.stroke();
   x.fillStyle='#fff';x.font='900 62px Trebuchet MS,sans-serif';x.textAlign='center';x.textBaseline='middle';x.shadowColor='rgba(0,0,0,.4)';x.shadowBlur=6;x.fillText(text,128,66);
   return new THREE.CanvasTexture(c);}
-function addGate(x,z,rot,mult,kind,price){const g=new THREE.Group();g.position.set(x,0,z);g.rotation.y=rot;scene.add(g);
+function addGate(x,z,rot,mult,cost){const g=new THREE.Group();g.position.set(x,0,z);g.rotation.y=rot;scene.add(g);
   const body=new THREE.MeshStandardMaterial({color:0x4a47c0,roughness:.4,metalness:.2,emissive:0x191455,emissiveIntensity:.5});
   const copper=new THREE.MeshStandardMaterial({color:0xb5642a,roughness:.6,metalness:.3});
   const gemMat=new THREE.MeshStandardMaterial({color:0x6fe0ff,roughness:.2,metalness:.3,emissive:0x2aa0d0,emissiveIntensity:.7});
-  const PW=3.1;                                         // полу-разнос столбов: монументальная арка, дозер едет под ней
+  const PW=4.6;                                         // полу-разнос столбов: огромная арка, дозер ~1/4 высоты (как в рефе)
   for(const sx of [-1,1]){                              // орнаментные столбы: тело + медный пояс + самоцвет
-    box(.85,5.4,.85,body,sx*PW,2.7,0,g);box(1.0,.6,1.0,copper,sx*PW,1.5,0,g);
-    const gem=new THREE.Mesh(new THREE.OctahedronGeometry(.6,0),gemMat);gem.position.set(sx*PW,5.7,0);g.add(gem);}
-  const red=kind==='red';
-  const cur=new THREE.Mesh(new THREE.PlaneGeometry(red?8.4:6.2,red?5.6:4.4),new THREE.MeshBasicMaterial({map:gateTex('×'+mult,kind),transparent:true,opacity:red?.96:.92,side:THREE.DoubleSide,blending:red?THREE.NormalBlending:THREE.AdditiveBlending,depthWrite:false}));
-  cur.position.set(0,red?3.1:2.7,0);cur.rotation.y=Math.PI;if(red)cur.rotation.z=0.12;g.add(cur); // лицом к подъезжающему (-z)
-  if(price){const b=new THREE.Mesh(new THREE.PlaneGeometry(3.6,1.8),new THREE.MeshBasicMaterial({map:bannerTex(price),transparent:true,side:THREE.DoubleSide,depthWrite:false}));b.position.set(0,6.6,0);b.rotation.y=Math.PI;g.add(b);}
-  gates.push({x,z,n:new THREE.Vector3(Math.sin(rot),0,Math.cos(rot)),right:new THREE.Vector3(Math.cos(rot),0,-Math.sin(rot)),mult,halfW:2.8});}
+    box(1.1,8.4,1.1,body,sx*PW,4.2,0,g);box(1.3,.8,1.3,copper,sx*PW,2.3,0,g);
+    const gem=new THREE.Mesh(new THREE.OctahedronGeometry(.85,0),gemMat);gem.position.set(sx*PW,8.9,0);g.add(gem);}
+  // одна и та же завеса в двух состояниях: red=заблокировано, white=активно (переключаем visible по bank>=cost)
+  function curtain(kind){const red=kind==='red';const m=new THREE.Mesh(new THREE.PlaneGeometry(11.0,8.2),new THREE.MeshBasicMaterial({map:gateTex('×'+mult,kind),transparent:true,opacity:red?.97:.9,side:THREE.DoubleSide,blending:red?THREE.NormalBlending:THREE.AdditiveBlending,depthWrite:false}));
+    m.position.set(0,4.6,0);m.rotation.y=Math.PI;g.add(m);return m;}
+  const redM=curtain('red'),whiteM=curtain('white');whiteM.visible=false;
+  const b=new THREE.Mesh(new THREE.PlaneGeometry(4.6,2.3),new THREE.MeshBasicMaterial({map:bannerTex(String(cost)),transparent:true,side:THREE.DoubleSide,depthWrite:false}));b.position.set(0,10.4,0);b.rotation.y=Math.PI;g.add(b);
+  gates.push({x,z,n:new THREE.Vector3(Math.sin(rot),0,Math.cos(rot)),right:new THREE.Vector3(Math.cos(rot),0,-Math.sin(rot)),mult,cost,active:false,red:redM,white:whiteM,halfW:2.8});}
 const pads=[];
 function makeLabel(){const c=document.createElement('canvas');c.width=256;c.height=128;const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true}));spr.userData.c=c;spr.scale.set(3.6,1.8,1);return spr;}
 function drawLabel(spr,top,bottom,col){const c=spr.userData.c,x=c.getContext('2d');x.clearRect(0,0,256,128);x.fillStyle=col||'#fff';x.font='900 60px Trebuchet MS,sans-serif';x.textAlign='center';x.textBaseline='middle';x.shadowColor='rgba(0,0,0,.5)';x.shadowBlur=8;x.fillText(top,128,44);x.font='900 44px Trebuchet MS,sans-serif';x.fillStyle='#ffe27a';x.fillText(bottom,128,96);spr.material.map.needsUpdate=true;}
@@ -169,11 +170,11 @@ function popup(world,text,color){const v=world.clone().project(camera);if(v.z>1)
 function setupWorld(){
   for(let i=0;i<N;i++){if(i<900)placeAtSource(i);else{C[i].st='free';free.push(i);hide(i);}}
   mesh.instanceMatrix.needsUpdate=true;
-  addGate(0,13,0,10,'white','150');
-  addGate(0,19,0,100,'red','2500');
-  addPad(0,27,'НОЖ',120,()=>{UP.bladeHalf+=0.5;blade.scale.x=UP.bladeHalf/1.6;});
-  addPad(-14,7,'ЗАХВАТ',150,()=>{UP.reach+=0.6;});
-  addPad(14,7,'ЦЕННОСТЬ',180,()=>{UP.mult*=1.7;});
+  addGate(0,20,0,10,150);     // разблокируется при bank>=150
+  addGate(0,40,0,100,2500);   // разблокируется при bank>=2500
+  addPad(0,56,'НОЖ',120,()=>{UP.bladeHalf+=0.5;blade.scale.x=UP.bladeHalf/1.6;});
+  addPad(-18,9,'ЗАХВАТ',150,()=>{UP.reach+=0.6;});
+  addPad(18,9,'ЦЕННОСТЬ',180,()=>{UP.mult*=1.7;});
   updateBank();
 }
 
@@ -200,7 +201,7 @@ function stepPush(dt){
       if(cnt>=cap){nlx=(lx>=0?1:-1)*(half+0.35);nlz=FRONT-0.3;yy=THK*0.5;}
       o.x=px+sn*nlz+cs*nlx;o.z=pz+cs*nlz-sn*nlx;o.y=yy;o.ry+=dt*4;setM(i);
       if(o.gateCd>0)o.gateCd-=dt;
-      for(const g of gates){if(o.gateCd>0||o.worth>=300)break;const gx=o.x-g.x,gz=o.z-g.z;const along=gx*g.n.x+gz*g.n.z;const lat=gx*g.right.x+gz*g.right.z;
+      for(const g of gates){if(o.gateCd>0||o.worth>=300)break;if(!g.active)continue;const gx=o.x-g.x,gz=o.z-g.z;const along=gx*g.n.x+gz*g.n.z;const lat=gx*g.right.x+gz*g.right.z;
         if(Math.abs(along)<0.7&&Math.abs(lat)<g.halfW){o.worth*=g.mult;o.gateCd=0.7;
           const sp=Math.min(g.mult-1,3);for(let k=0;k<sp;k++){const fi=free.pop();if(fi===undefined)break;const f=C[fi];f.x=o.x+(rnd()-.5);f.z=o.z+(rnd()-.5);f.worth=o.worth;f.gateCd=0.7;settle(fi);}
           chime('gate');popup(new THREE.Vector3(g.x,2.6,g.z),'×'+g.mult,'#7fe6ff');state.shake+=0.12;}}
@@ -213,6 +214,7 @@ function stepPush(dt){
     if(cnt>0){pendingClinks+=Math.min(6,cnt);
       if(p.fill>=p.cost){p.fill=0;p.level++;p.cost=Math.round(p.cost*p.grow);p.apply();chime('upgrade');state.shake+=0.3;drawLabel(p.lbl,p.name+' '+p.level,fmt(p.cost),'#aef0c0');p.ghost.scale.setScalar(1+p.level*0.06);}}
     p.fillBar.scale.x=Math.max(0.001,Math.min(1,p.fill/p.cost));}
+  for(const g of gates){const a=state.bank>=g.cost;if(a!==g.active){g.active=a;g.red.visible=!a;g.white.visible=a;}} // red(locked)->white(active)
   mesh.instanceMatrix.needsUpdate=true;updateBank();
 }
 
