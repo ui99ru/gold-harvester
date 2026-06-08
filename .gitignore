@@ -7,6 +7,11 @@ out/
 refs/frames/
 refs/strip_sec.png
 
+# Найденный референс-звук и собранный из него луп (лицензия неизвестна — не коммитим)
+refs/*.mp3
+refs/*.wav
+audio-loop.js
+
 # OS / редактор
 .DS_Store
 Thumbs.db

@@ -36,6 +36,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="audio-loop.js" onerror="window.__ENGINE_LOOP=null"></script><!-- локальный луп двигателя (опц., gitignore); нет файла -> процедурный fallback -->
 <script>
 (function(){
 'use strict';
@@ -61,26 +62,45 @@ const CFG={
   for(const[k,v]of QS){if(k in CFG){const n=Number(v);if(!Number.isNaN(n))CFG[k]=n;}}})();
 
 /* AUDIO */
-let AC=null,master=null,engineGain=null,muted=false;
+let AC=null,master=null,engineGain=null,engineBed=null,engineBedOsc=null,muted=false;
+let engineSrc=null,engineLoopGain=null,engineLoopReady=false;
 function audioInit(){if(AC){if(AC.state==='suspended')AC.resume();return;}
   AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=0.5;master.connect(AC.destination);
-  engineGain=AC.createGain();engineGain.gain.value=0.85;engineGain.connect(master);} // шина двигателя; звук = пул putt-импульсов (тарахтенье)
-// одиночный «туп» зажигания: низкий квадрат + механический щелчок "т"
+  engineGain=AC.createGain();engineGain.gain.value=0.85;engineGain.connect(master);  // шина двигателя
+  // непрерывный НЧ-«корпус» мотора — сливает импульсы в двигатель, а не в барабанную дробь
+  const bed=AC.createOscillator();bed.type='sawtooth';bed.frequency.value=78;
+  const blp=AC.createBiquadFilter();blp.type='lowpass';blp.frequency.value=240;
+  engineBed=AC.createGain();engineBed.gain.value=0.0;bed.connect(blp);blp.connect(engineBed);engineBed.connect(engineGain);bed.start();engineBedOsc=bed;
+  if(window.__ENGINE_LOOP){                                                         // зацикленный сэмпл двигателя (локальный луп) — приоритетный путь
+    engineLoopGain=AC.createGain();engineLoopGain.gain.value=0.0;engineLoopGain.connect(engineGain);
+    fetch(window.__ENGINE_LOOP).then(r=>r.arrayBuffer()).then(b=>AC.decodeAudioData(b)).then(buf=>{
+      engineSrc=AC.createBufferSource();engineSrc.buffer=buf;engineSrc.loop=true;engineSrc.connect(engineLoopGain);engineSrc.start();engineLoopReady=true;
+    }).catch(()=>{engineLoopReady=false;});
+  }}
+// одиночный «туп» зажигания (замер рефа: фундамент ~78, яркий клаттер ~2200, ВЧ ~13к, центроид ~4.4к)
 function putt(t,pitch,amp){
-  const o=AC.createOscillator();o.type='square';o.frequency.value=pitch;
-  const lp=AC.createBiquadFilter();lp.type='lowpass';lp.frequency.value=480;
-  const g=AC.createGain();g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(amp,t+0.004);g.gain.exponentialRampToValueAtTime(0.0006,t+0.07);
+  const o=AC.createOscillator();o.type='square';o.frequency.value=pitch;        // НЧ-тело
+  const lp=AC.createBiquadFilter();lp.type='lowpass';lp.frequency.value=700;
+  const g=AC.createGain();g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(amp*0.9,t+0.004);g.gain.exponentialRampToValueAtTime(0.0006,t+0.07);
   o.connect(lp);lp.connect(g);g.connect(engineGain);o.start(t);o.stop(t+0.1);
-  const nb=AC.createBuffer(1,120,AC.sampleRate),dd=nb.getChannelData(0);for(let i=0;i<120;i++)dd[i]=(Math.random()*2-1)*Math.pow(1-i/120,4);
-  const ns=AC.createBufferSource();ns.buffer=nb;const bp=AC.createBiquadFilter();bp.type='bandpass';bp.frequency.value=1800;bp.Q.value=1.1;
-  const ng=AC.createGain();ng.gain.value=amp*0.45;ns.connect(bp);bp.connect(ng);ng.connect(engineGain);ns.start(t);}
+  const L=900,nb=AC.createBuffer(1,L,AC.sampleRate),dd=nb.getChannelData(0);for(let i=0;i<L;i++)dd[i]=(Math.random()*2-1)*Math.pow(1-i/L,3); // клаттер-стук
+  const ns=AC.createBufferSource();ns.buffer=nb;const bp=AC.createBiquadFilter();bp.type='bandpass';bp.frequency.value=2200;bp.Q.value=0.8;
+  const ng=AC.createGain();ng.gain.value=amp*0.5;ns.connect(bp);bp.connect(ng);ng.connect(engineGain);ns.start(t);
+  const L2=200,n2=AC.createBuffer(1,L2,AC.sampleRate),d2=n2.getChannelData(0);for(let i=0;i<L2;i++)d2[i]=(Math.random()*2-1)*Math.pow(1-i/L2,4); // ВЧ «дзинь»
+  const s2=AC.createBufferSource();s2.buffer=n2;const hp=AC.createBiquadFilter();hp.type='highpass';hp.frequency.value=9000;
+  const g2=AC.createGain();g2.gain.value=amp*0.18;s2.connect(hp);hp.connect(g2);g2.connect(engineGain);s2.start(t);}
 let enginePuttNext=0;
-function pumpEngine(){                                  // планировщик «тыр-тыр-тыр»: частота=RPM растёт со скоростью
+function pumpEngine(){                                  // тарахтенье: неровный темп 6..10/с (не дробь), скорость = питч + «корпус»
   if(!AC||muted||state.phase!=='play')return;
-  const tnow=AC.currentTime,look=0.12,sp=Math.min(1,state.speedNow/UP.move);
-  const rate=5.5+sp*11, pitch=56+sp*10, amp=0.5+sp*0.5;
+  const tnow=AC.currentTime,look=0.14,sp=Math.min(1,state.speedNow/UP.move);
+  if(engineLoopReady){                                  // луп-сэмпл: громкость + playbackRate(=RPM) по скорости; синтез глушим
+    engineLoopGain.gain.value=0.55+sp*0.45;engineSrc.playbackRate.value=0.9+sp*0.5;
+    if(engineBed)engineBed.gain.value=0;return;
+  }
+  const rate=6+sp*4, pitch=74+sp*16, amp=0.5+sp*0.4;
+  if(engineBed){engineBed.gain.value=0.05+sp*0.14;if(engineBedOsc)engineBedOsc.frequency.value=74+sp*16;}
   if(enginePuttNext<tnow)enginePuttNext=tnow;
-  while(enginePuttNext<tnow+look){putt(enginePuttNext,pitch+(Math.random()-.5)*2,amp);enginePuttNext+=1/rate;}}
+  while(enginePuttNext<tnow+look){putt(enginePuttNext,pitch+(Math.random()-.5)*3,amp*(0.8+Math.random()*0.4));enginePuttNext+=(1/rate)*(0.82+Math.random()*0.36);}} // неровный ритм
 function clink(){if(!AC||muted)return;const t=AC.currentTime,base=2100+Math.random()*900;
   [[1,.5],[1.5,.22],[2.3,.14],[3.4,.08]].forEach(([r,a])=>{const o=AC.createOscillator();o.type='triangle';o.frequency.value=base*r;
     const g=AC.createGain();const amp=a*(0.5+Math.random()*0.5);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(amp,t+0.002);
@@ -112,12 +132,33 @@ for(let i=0;i<50;i++){const a=rnd()*6.28,r=70+rnd()*35,s=3+rnd()*5;const m=new T
 
 /* DOZER */
 const dozer=new THREE.Group();
-const blue=new THREE.MeshStandardMaterial({color:0x5e7be0,roughness:.4,metalness:.2});const dark=new THREE.MeshStandardMaterial({color:0x232733,roughness:.7});
-const purple=new THREE.MeshStandardMaterial({color:0x8a4fd6,roughness:.35,metalness:.3,emissive:0x240a44,emissiveIntensity:.5});const glass=new THREE.MeshStandardMaterial({color:0x9fe0ff,roughness:.1,metalness:.5});
+const chassisM=new THREE.MeshStandardMaterial({color:0x6a4fc0,roughness:.45,metalness:.2});
+const cabM=new THREE.MeshStandardMaterial({color:0x5e7be0,roughness:.4,metalness:.2});const roofM=new THREE.MeshStandardMaterial({color:0x9fb4f5,roughness:.45});
+const dark=new THREE.MeshStandardMaterial({color:0x222633,roughness:.75});const tread=new THREE.MeshStandardMaterial({color:0x14161d,roughness:.85});
+const steel=new THREE.MeshStandardMaterial({color:0xc8ccd6,roughness:.35,metalness:.6});
+const purple=new THREE.MeshStandardMaterial({color:0x8a4fd6,roughness:.35,metalness:.3,emissive:0x240a44,emissiveIntensity:.4});
+const glass=new THREE.MeshStandardMaterial({color:0x9fe0ff,roughness:.1,metalness:.5,transparent:true,opacity:.7});
 function box(w,h,d,m,x,y,z,p){const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);(p||dozer).add(b);return b;}
-box(1.9,.9,2.6,blue,0,.85,-.1);box(1.35,.8,1.25,blue,0,1.6,-.45);box(1.15,.6,.08,glass,0,1.68,.18);box(.95,.85,2.9,dark,-1.05,.5,-.1);box(.95,.85,2.9,dark,1.05,.5,-.1);box(.22,.55,.22,dark,0,2.1,-.9);
-box(.5,.5,.5,new THREE.MeshStandardMaterial({color:0x6ab04c,roughness:.7}),0,1.75,-.3);box(.55,.2,.55,new THREE.MeshStandardMaterial({color:0xf4c542,roughness:.6}),0,2.05,-.3);
-const blade=box(2.6,1.0,.35,purple,0,.6,1.55);blade.rotation.x=-0.16;box(.2,.18,1.3,purple,-1.0,.5,.95);box(.2,.18,1.3,purple,1.0,.5,.95);scene.add(dozer);
+function cyl(r,h,m,x,y,z,ax,p){const b=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,16),m);b.position.set(x,y,z);if(ax==='x')b.rotation.z=Math.PI/2;if(ax==='z')b.rotation.x=Math.PI/2;(p||dozer).add(b);return b;}
+// гусеницы: длинные тёмные, округлые торцы + протектор + ступица
+for(const sx of [-1,1]){
+  box(.8,.5,3.0,dark,sx*1.0,.42,0);cyl(.27,.82,dark,sx*1.0,.42,1.5,'x');cyl(.27,.82,dark,sx*1.0,.42,-1.5,'x');
+  cyl(.16,.86,steel,sx*1.0,.42,0,'x');
+  for(let z=-1.3;z<=1.31;z+=0.52)box(.86,.1,.13,tread,sx*1.0,.66,z);
+}
+// шасси + капот + решётка + фары
+box(1.7,.6,2.1,chassisM,0,.95,-.05);box(1.5,.46,.9,chassisM,0,.86,.9);box(1.2,.32,.06,dark,0,.82,1.36);
+cyl(.15,.18,steel,-.45,.9,1.4,'z');cyl(.15,.18,steel,.45,.9,1.4,'z');
+// кабина + крыша + стёкла + выхлоп
+box(1.25,.66,1.1,cabM,0,1.6,-.5);box(1.36,.12,1.22,roofM,0,1.98,-.5);
+box(1.04,.42,.05,glass,0,1.6,.04);box(.05,.42,.86,glass,-.62,1.6,-.5);box(.05,.42,.86,glass,.62,1.6,-.5);
+cyl(.08,.5,dark,.52,2.0,0,'y');cyl(.12,.1,dark,.52,2.27,0,'y');
+// водитель
+box(.38,.4,.38,new THREE.MeshStandardMaterial({color:0x6ab04c,roughness:.7}),0,1.66,-.42);box(.44,.18,.44,new THREE.MeshStandardMaterial({color:0xf4c542,roughness:.6}),0,1.93,-.42);
+// нож: фиолетовый, верхняя+режущая кромки (children -> масштабируются/наклоняются с ножом), толкающие рычаги
+const blade=box(2.6,.9,.28,purple,0,.66,1.62);blade.rotation.x=-0.16;
+box(2.6,.16,.42,purple,0,.5,.16,blade);box(2.6,.12,.1,steel,0,-.46,.12,blade);
+box(.2,.16,1.2,chassisM,-.95,.55,1.0);box(.2,.16,1.2,chassisM,.95,.55,1.0);scene.add(dozer);
 const shadow=new THREE.Mesh(new THREE.CircleGeometry(2.2,24),new THREE.MeshBasicMaterial({color:0,transparent:true,opacity:.25}));shadow.rotation.x=-Math.PI/2;shadow.position.y=.04;scene.add(shadow);
 
 /* DISCRETE STACKING COINS */
