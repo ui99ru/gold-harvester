@@ -37,7 +37,7 @@ async function run() {
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   page.on('pageerror', e => console.error('PAGE ERROR:', e.message));
 
-  const url = pathToFileURL(path.join(ROOT, 'index.html')).href + `?test=1&seed=${SEED}` + (Q ? '&' + Q : '');
+  const url = pathToFileURL(path.join(ROOT, 'dist', 'index.html')).href + `?test=1&seed=${SEED}` + (Q ? '&' + Q : '');
   await page.goto(url);
   await page.waitForFunction('window.__sim && window.__sim.ready === true', { timeout: 15000 });
   await page.waitForTimeout(200); // дать three/CDN дорисовать первый кадр

@@ -19,7 +19,7 @@ async function run() {
   const browser = await chromium.launch({ headless: !HEADED, args: ['--use-gl=angle', '--use-angle=swiftshader', '--ignore-gpu-blocklist', '--enable-unsafe-swapchain'] });
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   page.on('pageerror', e => console.error('PAGE ERROR:', e.message));
-  const url = pathToFileURL(path.join(ROOT, 'index.html')).href + `?test=1&seed=${SEED}` + (Q ? '&' + Q : '');
+  const url = pathToFileURL(path.join(ROOT, 'dist', 'index.html')).href + `?test=1&seed=${SEED}` + (Q ? '&' + Q : '');
   await page.goto(url);
   await page.waitForFunction('window.__sim && window.__sim.ready === true', { timeout: 15000 });
   await page.evaluate(() => window.__sim.setTarget({ x: 0, z: 56 }));   // проезд по коридору
