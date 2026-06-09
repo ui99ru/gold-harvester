@@ -17,7 +17,7 @@ export function rnd() { return _rng(); }   // = Math.random в обычном р
 // Все «магические числа», которые крутит цикл сравнения (реф > ТЗ: лавандовый грунт, насыщенное золото).
 export const CFG = {
   exposure: 0.92, bgColor: 0x7c6cb2, groundColor: 0x9c8fc0, fogNear: 120, fogFar: 360,
-  fov: 47, camHeight: 24, camBack: 17, lookAhead: 7, camYaw: -0.6,   // круче наклон → горизонта нет, площадка «завалена» на зрителя
+  fov: 47, camHeight: 24, camBack: 17, lookAhead: 7, camYaw: 0.6,   // круче наклон, без горизонта; +yaw: коридор влево-вверх как в рефе
   sunInt: 1.5, hemiInt: 1.15,   // ярче, насыщеннее — «праздник», не пасмурно
   coinColor: 0xffb42e, coinMetal: 0.42, coinRough: 0.36, coinEmissive: 0xc06a00, coinEmInt: 0.27,   // золото: меньше металл/envMap → чистый оранж (не синит от пурпурной среды)
   gateCurtain: 0x5ac8ff, gateGlow: 0x39c8ff,
@@ -26,8 +26,8 @@ export const CFG = {
   gravityY: -30, coinDensity: 9.0, coinFriction: 0.95, coinRestitution: 0.02, linDamp: 0.8, angDamp: 0.9, contactThr: 50, coinMaxV: 12,
   clinkCap: 3, clinkScale: 0.05, clinkV: 3.0,   // звон: макс дзынь/кадр, масштаб, порог «удара» (выше → скольжение/оседание молчит)
   calmV: 1.2, calmW: 6.0, calmFrames: 18, calmVy: 0.4, calmFlat: 0.45, flattenK: 8,   // деадзона + активный «завал» монеты с ребра (угл.скорость к плашмя)
-  gate1cost: 150, gate2cost: 2500,   // порог разблокировки ворот (для тестов/тюна)
-  laneHalf: 2.8, srcR: 2.4,          // перенос: полуширина коридора-стенок / радиус разброса источника
+  gate1cost: 10, gate2cost: 600, upgradeCost: 120, startCoins: 5,   // разблок ворот накоплением / старт 5 монет
+  laneHalf: 2.8, srcR: 0.8,          // перенос: полуширина коридора-стенок / радиус источника (узкий → нож ловит все)
   bladeWing: 0.5, bladeWingAng: 0.3,    // вогнутый отвал: длина крыла / угол toe-in (рад) — крылья меньше
   move: 10,   // скорость дозера (она же цель апгрейда); низкая → монеты успевают сгрестись, не разлетаются
 };

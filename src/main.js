@@ -118,12 +118,13 @@ function placeAtSource(i) { const a = rnd() * 6.28, r = Math.sqrt(rnd()) * CFG.s
 const gates = []; const obstacles = [];   // твёрдые препятствия для дозера (столбы ворот, задние стенки падов) — AABB
 function gateTex(label, kind) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 256; const x = c.getContext('2d');
+  const fit = (base) => { let fs = base; x.font = `900 ${fs}px Trebuchet MS,sans-serif`; while (x.measureText(label).width > 218 && fs > 40) { fs -= 4; x.font = `900 ${fs}px Trebuchet MS,sans-serif`; } };   // ×100 не вылезает за край
   if (kind === 'red') {   // красно-белый полосатый шеврон (×100 в рефе = заблокировано)
     x.fillStyle = '#fff'; x.fillRect(0, 0, 256, 256); x.save(); x.translate(128, 128); x.rotate(-0.5); x.fillStyle = '#e8392f';
     for (let i = -320; i < 320; i += 56) x.fillRect(i, -260, 28, 520); x.restore();
-    x.font = '900 92px Trebuchet MS,sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineWidth = 9; x.strokeStyle = '#b81d16'; x.strokeText(label, 128, 140); x.fillStyle = '#fff'; x.fillText(label, 128, 140);
+    fit(92); x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineWidth = 9; x.strokeStyle = '#b81d16'; x.strokeText(label, 128, 140); x.fillStyle = '#fff'; x.fillText(label, 128, 140);
   } else {                // светло-циановая стеклянная завеса (активно)
-    x.fillStyle = 'rgba(150,225,255,.16)'; x.fillRect(0, 0, 256, 256); x.fillStyle = '#f2ffff'; x.font = '900 140px Trebuchet MS,sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.shadowColor = '#5ec8ff'; x.shadowBlur = 20; x.fillText(label, 128, 138);
+    x.fillStyle = 'rgba(150,225,255,.16)'; x.fillRect(0, 0, 256, 256); x.fillStyle = '#f2ffff'; fit(140); x.textAlign = 'center'; x.textBaseline = 'middle'; x.shadowColor = '#5ec8ff'; x.shadowBlur = 20; x.fillText(label, 128, 138);
   }
   return srgb(new THREE.CanvasTexture(c));
 }
@@ -143,15 +144,22 @@ function addGate(x, z, rot, mult, cost) {
   for (const sx of [-1, 1]) {
     box(1.1, 8.4, 1.1, body, sx * PW, 4.2, 0, g); box(1.3, .8, 1.3, copper, sx * PW, 2.3, 0, g);
     const gem = new THREE.Mesh(new THREE.OctahedronGeometry(.85, 0), gemMat); gem.position.set(sx * PW, 8.9, 0); g.add(gem);
-    const ox = x + sx * PW * Math.cos(rot), oz = z - sx * PW * Math.sin(rot); obstacles.push({ x0: ox - 0.75, x1: ox + 0.75, z0: oz - 0.75, z1: oz + 0.75 });   // столб — твёрдый
+    const ox = x + sx * PW * Math.cos(rot), oz = z - sx * PW * Math.sin(rot); obstacles.push({ x0: ox - 0.75, x1: ox + 0.75, z0: oz - 0.75, z1: oz + 0.75, post: true });   // столб — твёрдый, блокирует и нож
   }
   function curtain(kind) {   // одна завеса в двух состояниях: red=locked / white=active
-    const red = kind === 'red'; const m = new THREE.Mesh(new THREE.PlaneGeometry(11.0, 8.2), new THREE.MeshBasicMaterial({ map: gateTex('×' + mult, kind), transparent: true, opacity: red ? .97 : .9, side: THREE.DoubleSide, blending: red ? THREE.NormalBlending : THREE.AdditiveBlending, depthWrite: false }));
-    m.position.set(0, 4.6, 0); m.rotation.y = Math.PI; g.add(m); return m;
+    const red = kind === 'red'; const m = new THREE.Mesh(new THREE.PlaneGeometry(7.6, 7.0), new THREE.MeshBasicMaterial({ map: gateTex('×' + mult, kind), transparent: true, opacity: red ? .97 : .9, side: THREE.DoubleSide, blending: red ? THREE.NormalBlending : THREE.AdditiveBlending, depthWrite: false }));
+    m.position.set(0, 4.4, 0); m.rotation.y = Math.PI; g.add(m); return m;   // внутри просвета столбов (8.1), чуть меньше
   }
   const redM = curtain('red'), whiteM = curtain('white'); whiteM.visible = false;
+  const mat = new THREE.Group();   // пад-мат: шире ворот, выдвинут ПЕРЕД ними (к игроку) — копит монеты, исчезает при открытии
+  box(10.8, .16, 3.4, new THREE.MeshStandardMaterial({ color: 0xf2c63a, roughness: .6, emissive: 0x4a3a00, emissiveIntensity: .2 }), 0, .08, 0, mat);
+  box(10.2, .2, 2.9, new THREE.MeshStandardMaterial({ color: 0x3a2f63, roughness: .85 }), 0, .12, 0, mat);
+  mat.position.z = -1.6; g.add(mat);   // local -z = сторона подъезда
+  const GH = 2.4, BOT = 0.3;   // бар прогресса разблокировки (копится монетами до cost)
+  box(7.2, GH, .4, new THREE.MeshStandardMaterial({ color: 0x123040, transparent: true, opacity: .3, roughness: .4 }), 0, BOT + GH / 2, 0.7, g);
+  const fillBar = new THREE.Mesh(new THREE.BoxGeometry(6.9, GH, .46), new THREE.MeshBasicMaterial({ color: 0x35d8e6, transparent: true, opacity: .85, blending: THREE.AdditiveBlending, depthWrite: false })); fillBar.position.set(0, BOT, 0.7); fillBar.scale.y = 0.001; g.add(fillBar);
   const b = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 2.3), new THREE.MeshBasicMaterial({ map: bannerTex(String(cost)), transparent: true, side: THREE.DoubleSide, depthWrite: false })); b.position.set(0, 10.4, 0); b.rotation.y = Math.PI; g.add(b);
-  gates.push({ x, z, n: new THREE.Vector3(Math.sin(rot), 0, Math.cos(rot)), right: new THREE.Vector3(Math.cos(rot), 0, -Math.sin(rot)), mult, cost, active: false, red: redM, white: whiteM, halfW: 2.8 });
+  gates.push({ x, z, n: new THREE.Vector3(Math.sin(rot), 0, Math.cos(rot)), right: new THREE.Vector3(Math.cos(rot), 0, -Math.sin(rot)), mult, cost, active: false, fill: 0, red: redM, white: whiteM, fillBar, mat, GH, BOT, halfW: 2.8 });
 }
 const pads = [];
 function makeLabel() { const c = document.createElement('canvas'); c.width = 256; c.height = 128; const m = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 2.1), new THREE.MeshBasicMaterial({ map: srgb(new THREE.CanvasTexture(c)), transparent: true, side: THREE.DoubleSide, depthWrite: false })); m.userData.c = c; return m; }
@@ -161,15 +169,16 @@ function addPad(x, z, name, cost, apply) {
   box(5.0, .16, 5.0, new THREE.MeshStandardMaterial({ color: 0xf2c63a, roughness: .6, emissive: 0x4a3a00, emissiveIntensity: .2 }), 0, .08, 0, g); // жёлтый въездной мат
   box(4.2, .2, 4.2, new THREE.MeshStandardMaterial({ color: 0x3a2f63, roughness: .85 }), 0, .12, 0, g);                                            // тёмная вставка
   box(4.8, 3.4, 1.1, new THREE.MeshStandardMaterial({ color: 0x6a4cc0, roughness: .5, emissive: 0x1e1050, emissiveIntensity: .4 }), 0, 1.7, 3.0, g); // задняя стойка
-  obstacles.push({ x0: x - 2.4, x1: x + 2.4, z0: z + 3 - 0.6, z1: z + 3 + 0.6 });   // задняя стойка пада — твёрдая
+  const obst = { x0: x - 2.4, x1: x + 2.4, z0: z + 3 - 0.6, z1: z + 3 + 0.6 }; obstacles.push(obst);   // задняя стойка пада — твёрдая
   const GH = 3.0, BOT = 0.25;
   box(3.6, GH, .5, new THREE.MeshStandardMaterial({ color: 0x123040, transparent: true, opacity: .32, roughness: .4 }), 0, BOT + GH / 2, 2.25, g);  // рамка стекла
   const fill = new THREE.Mesh(new THREE.BoxGeometry(3.3, GH, .55), new THREE.MeshBasicMaterial({ color: 0x35d8e6, transparent: true, opacity: .82, blending: THREE.AdditiveBlending, depthWrite: false })); fill.position.set(0, BOT + 0.001, 2.3); fill.scale.y = 0.001; g.add(fill);
   const gm = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: .5, roughness: .6, emissive: 0x444444 }); const ghost = new THREE.Group(); // призрак награды
   box(1.4, .8, 1.9, gm, 0, 0, 0, ghost); box(1.0, .7, .9, gm, 0, .6, -.35, ghost); box(1.9, .55, .3, gm, 0, -.12, 1.05, ghost); ghost.position.set(0, 1.3, 2.15); g.add(ghost);
   const lbl = makeLabel(); lbl.position.set(0, 4.0, 2.45); lbl.rotation.y = Math.PI; g.add(lbl);
-  const pad = { x, z, half: 2.4, name, cost, fill: 0, level: 0, grow: 1.8, apply, ghost, fillBar: fill, lbl, GH, BOT }; drawLabel(lbl, 'UPGRADE', name + ' ' + fmt(cost), '#fff'); pads.push(pad);
+  const pad = { x, z, half: 2.4, name, cost, fill: 0, apply, ghost, fillBar: fill, lbl, GH, BOT, g, obst, done: false }; drawLabel(lbl, 'UPGRADE', name + ' ' + fmt(cost), '#fff'); pads.push(pad);
 }
+function removePad(p) { p.done = true; scene.remove(p.g); const i = obstacles.indexOf(p.obst); if (i >= 0) obstacles.splice(i, 1); }   // апгрейд-пад исчезает после апгрейда
 
 /* HUD */
 const elBank = document.getElementById('bankNum'), elFx = document.getElementById('fx');
@@ -190,10 +199,8 @@ function emitDust() { const f = Math.sin(state.heading), cf = Math.cos(state.hea
 function emitSparks(x, z, n) { for (let k = 0; k < n; k++) { const a = rnd() * 6.28, sp = 2 + rnd() * 3; emit(x + (rnd() - .5) * 1.5, .4, z + (rnd() - .5) * 1.5, { color: 0xffd86a, life: .4 + rnd() * .2, size: .45, size1: .1, add: true, vy: 2.5 + rnd() * 2, grav: 7, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, fade: 1 }); } }
 
 function setupWorld() {   // монеты-тела создаются в bootPhysics (нужен phys); здесь — статичный мир
-  addGate(0, 20, 0, 10, CFG.gate1cost); addGate(0, 40, 0, 100, CFG.gate2cost);
-  addPad(0, 56, 'НОЖ', 120, () => { UP.bladeHalf += 0.5; blade.scale.x = UP.bladeHalf / 1.6; phys.rebuildBladeCollider(bladeHX(), 0.65, 0.14, CFG.bladeWing, CFG.bladeWingAng); });
-  addPad(-18, 9, 'ЗАХВАТ', 150, () => { UP.reach += 0.6; });
-  addPad(18, 9, 'ЦЕННОСТЬ', 180, () => { UP.mult *= 1.7; });
+  addGate(0, 20, 0, 10, CFG.gate1cost); addGate(0, 40, 0, 100, CFG.gate2cost);   // ворота-разблокировка (копятся монетами)
+  addPad(0, 54, 'НОЖ', CFG.upgradeCost, () => { UP.bladeHalf += 0.5; blade.scale.x = UP.bladeHalf / 1.6; phys.rebuildBladeCollider(bladeHX(), 0.65, 0.14, CFG.bladeWing, CFG.bladeWingAng); });   // один апгрейд-пад, исчезает
   updateBank();
 }
 
@@ -237,10 +244,11 @@ async function bootPhysics() {
     calmV: CFG.calmV, calmW: CFG.calmW, calmFrames: CFG.calmFrames, calmVy: CFG.calmVy, calmFlat: CFG.calmFlat, flattenK: CFG.flattenK, clinkV: CFG.clinkV,
   });
   for (let i = 0; i < N; i++) phys.addCoinBody(i, 0, -999, 0);              // пул тел — создать раз
-  for (let i = 0; i < N; i++) { if (i < 420) placeAtSource(i); else { C[i].st = 'free'; free.push(i); phys.hideCoin(i); hideM(i); } }
+  for (let i = 0; i < N; i++) { if (i < CFG.startCoins) placeAtSource(i); else { C[i].st = 'free'; free.push(i); phys.hideCoin(i); hideM(i); } }
   phys.addBlade(bladeHX(), 0.65, 0.14, CFG.bladeWing, CFG.bladeWingAng);
   phys.addChassis([{ hx: 1.4, hy: 0.5, hz: 0.75, cy: 0.5, cz: 0.75 }, { hx: 1.4, hy: 1.0, hz: 0.95, cy: 1.0, cz: -0.7 }]);   // фронт-низ (стык, не таранит) + кабина-высокая (монеты не на корпусе)
   phys.addWall(-CFG.laneHalf, 0.6, 31, 0.2, 0.6, 27); phys.addWall(CFG.laneHalf, 0.6, 31, 0.2, 0.6, 27);   // коридор z∈[4,58]: монеты в полосе
+  phys.addWall(0, 0.6, 4, CFG.laneHalf, 0.6, 0.25);   // задняя стенка: монеты не уезжают за источник (всегда ловятся ножом)
   syncCoins(); mesh.instanceMatrix.needsUpdate = true;
 }
 function start() { if (!TEST) audioInit(); document.getElementById('start').classList.add('hidden'); document.getElementById('bank').classList.remove('hidden'); document.getElementById('mute').classList.remove('hidden'); setupWorld(); state.phase = 'play'; }
@@ -261,13 +269,20 @@ function applyScriptInput() {
   ctrl.desired = null; ctrl.moving = false;
   if (_target) { const dx = _target.x - dozer.position.x, dz = _target.z - dozer.position.z; if (dx * dx + dz * dz > 0.25) { ctrl.desired = Math.atan2(dx, dz); ctrl.moving = true; } }
 }
-const DOZER_R = 1.6;
-function resolveObstacles() {   // дозер-круг vs AABB-препятствия: выталкиваем (не проходит сквозь столбы/пады)
+const DOZER_R = 1.6, BLADE_R = 0.35;
+function pushOut(px, pz, R2) {   // выталкивает точку из всех AABB-препятствий; возвращает сдвиг дозера
   for (const o of obstacles) {
-    const cx = Math.max(o.x0, Math.min(dozer.position.x, o.x1)), cz = Math.max(o.z0, Math.min(dozer.position.z, o.z1));
-    const dx = dozer.position.x - cx, dz = dozer.position.z - cz, d2 = dx * dx + dz * dz;
-    if (d2 > 1e-6 && d2 < DOZER_R * DOZER_R) { const d = Math.sqrt(d2), p = (DOZER_R - d) / d; dozer.position.x += dx * p; dozer.position.z += dz * p; }
+    if (R2 === BLADE_R * BLADE_R && !o.post) continue;   // нож блокируют только столбы
+    const cx = Math.max(o.x0, Math.min(px, o.x1)), cz = Math.max(o.z0, Math.min(pz, o.z1));
+    const dx = px - cx, dz = pz - cz, d2 = dx * dx + dz * dz, R = Math.sqrt(R2);
+    if (d2 > 1e-6 && d2 < R2) { const d = Math.sqrt(d2), k = (R - d) / d; dozer.position.x += dx * k; dozer.position.z += dz * k; return true; }
   }
+  return false;
+}
+function resolveObstacles() {   // дозер-круг (корпус) + концы ножа (vs столбы) → не проходит сквозь столбы/пады
+  pushOut(dozer.position.x, dozer.position.z, DOZER_R * DOZER_R);
+  const h = state.heading, sn = Math.sin(h), cs = Math.cos(h), bw = bladeHX() + 0.15;
+  for (const s of [-1, 1]) pushOut(dozer.position.x + sn * BLADE_FWD + cs * s * bw, dozer.position.z + cs * BLADE_FWD - sn * s * bw, BLADE_R * BLADE_R);   // концы ножа vs столбы
 }
 let treadPhase = 0;
 function animTracks(dt) {   // прокрутка протектора: вперёд → блоки бегут к корме и заворачиваются (иллюзия вращения)
@@ -311,39 +326,49 @@ function stepPhysics(dt) {
   if (cl > 0) addClinks(Math.min(CFG.clinkCap, Math.ceil(cl * CFG.clinkScale)));    // удар монет → звон (pumpClinks лимитит 25Гц)
   syncCoins();
 }
-/* ЭКОНОМИКА на телах: ворота ×N (читают позиции тел), ссып в пад → банк, состояние ворот */
+/* ЭКОНОМИКА на телах: запертые ворота поглощают→копят→открываются; открытые множат ×N; апгрейд-пад исчезает */
+function setBar(o) { const r = Math.max(0.001, Math.min(1, o.fill / o.cost)); o.fillBar.scale.y = r; o.fillBar.position.y = o.BOT + o.GH * r * 0.5; }
 function stepEconomy(dt) {
   if (!phys) return;
-  for (let i = 0; i < N; i++) {                                                    // ворота: умножение worth + копии
-    const o = C[i]; if (o.st === 'free') continue;
-    if (o.gateCd > 0) o.gateCd -= dt;
-    if (o.gateCd > 0 || o.worth >= 300) continue;
-    const t = phys.coinPos(i); if (!t || t.y < -100) continue;
-    for (const g of gates) {
-      if (!g.active) continue;
-      const gx = t.x - g.x, gz = t.z - g.z, along = gx * g.n.x + gz * g.n.z, lat = gx * g.right.x + gz * g.right.z;
-      if (Math.abs(along) < 0.7 && Math.abs(lat) < g.halfW) {
-        o.worth *= g.mult; o.gateCd = 0.7;
-        const sp = Math.min(g.mult - 1, 3);
-        for (let k = 0; k < sp; k++) { const fi = free.pop(); if (fi === undefined) break; const f = C[fi]; f.worth = o.worth; f.gateCd = 0.7; f.st = 'rest'; phys.enableCoin(fi); phys.setCoinTransform(fi, t.x + (rnd() - .5), THK * 0.5 + 1 + rnd(), t.z + (rnd() - .5)); }
-        chime('gate'); popup(new THREE.Vector3(g.x, 2.6, g.z), '×' + g.mult, '#7fe6ff'); state.shake += 0.12; break;
+  for (let i = 0; i < N; i++) { const o = C[i]; if (o.st !== 'free' && o.gateCd > 0) o.gateCd -= dt; }
+  for (const g of gates) {
+    if (g.active) {                                                                // открыты: множим проходящие
+      for (let i = 0; i < N; i++) {
+        const o = C[i]; if (o.st === 'free' || o.gateCd > 0 || o.worth >= 300) continue;
+        const t = phys.coinPos(i); if (!t || t.y < -100) continue;
+        const gx = t.x - g.x, gz = t.z - g.z, along = gx * g.n.x + gz * g.n.z, lat = gx * g.right.x + gz * g.right.z;
+        if (Math.abs(along) < 0.7 && Math.abs(lat) < g.halfW) {
+          o.worth *= g.mult; o.gateCd = 0.7;
+          const sp = Math.min(g.mult - 1, 3);
+          for (let k = 0; k < sp; k++) { const fi = free.pop(); if (fi === undefined) break; const f = C[fi]; f.worth = o.worth; f.gateCd = 0.7; f.st = 'rest'; phys.enableCoin(fi); phys.setCoinTransform(fi, t.x + (rnd() - .5), THK * 0.5 + 1 + rnd(), t.z + (rnd() - .5)); }
+          chime('gate'); popup(new THREE.Vector3(g.x, 2.6, g.z), '×' + g.mult, '#7fe6ff'); state.shake += 0.12;
+        }
       }
+    } else {                                                                       // заперты: держат → поглощают на разблокировку
+      let cnt = 0;
+      for (let i = 0; i < N; i++) {
+        const o = C[i]; if (o.st === 'free') continue;
+        const t = phys.coinPos(i); if (!t || t.y < -100) continue;
+        const gx = t.x - g.x, gz = t.z - g.z, along = gx * g.n.x + gz * g.n.z, lat = gx * g.right.x + gz * g.right.z;
+        if (Math.abs(along + 1.6) < 1.7 && Math.abs(lat) < 5.2) { const v = o.worth * UP.mult; g.fill += v; state.bank += v; cnt++; placeAtSource(i); }   // зона = мат (выдвинут перед воротами, шире столбов)
+      }
+      if (cnt > 0) { addClinks(Math.min(6, cnt)); emitSparks(g.x, g.z, Math.min(8, cnt)); }
+      if (g.fill >= g.cost) { g.active = true; g.red.visible = false; g.white.visible = true; g.fillBar.visible = false; g.mat.visible = false; chime('upgrade'); state.shake += 0.3; emitSparks(g.x, g.z, 22); popup(new THREE.Vector3(g.x, 3, g.z), 'ОТКРЫТО ×' + g.mult, '#aef0c0'); }
+      else setBar(g);
     }
   }
-  for (const p of pads) {                                                          // пады: ссып → банк + апгрейд
+  for (const p of pads) {                                                          // апгрейд-пад: ссып → апгрейд → исчезает
+    if (p.done) continue;
     let cnt = 0;
     for (let i = 0; i < N; i++) {
       const o = C[i]; if (o.st === 'free') continue;
       const t = phys.coinPos(i); if (!t || t.y < -100) continue;
       if (Math.abs(t.x - p.x) < p.half && Math.abs(t.z - p.z) < p.half) { const v = o.worth * UP.mult; p.fill += v; state.bank += v; cnt++; placeAtSource(i); }
     }
-    if (cnt > 0) {
-      addClinks(Math.min(6, cnt)); emitSparks(p.x, p.z, Math.min(8, cnt));
-      if (p.fill >= p.cost) { p.fill = 0; p.level++; p.cost = Math.round(p.cost * p.grow); p.apply(); chime('upgrade'); state.shake += 0.34; emitSparks(p.x, p.z, 22); drawLabel(p.lbl, 'UPGRADE', p.name + ' ' + fmt(p.cost), '#aef0c0'); p.ghost.scale.setScalar(1 + p.level * 0.06); }
-    }
-    { const r = Math.max(0.001, Math.min(1, p.fill / p.cost)); p.fillBar.scale.y = r; p.fillBar.position.y = p.BOT + p.GH * r * 0.5; }
+    if (cnt > 0) { addClinks(Math.min(6, cnt)); emitSparks(p.x, p.z, Math.min(8, cnt)); }
+    if (p.fill >= p.cost) { p.apply(); chime('upgrade'); state.shake += 0.34; emitSparks(p.x, p.z, 22); removePad(p); }
+    else setBar(p);
   }
-  for (const g of gates) { const a = state.bank >= g.cost; if (a !== g.active) { g.active = a; g.red.visible = !a; g.white.visible = a; } }   // red=locked / white=active
   updateBank();
 }
 function updateCamera(dt) {
