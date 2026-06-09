@@ -234,7 +234,7 @@ async function bootPhysics() {
     count: N, thk: THK, rad: RAD, gravity: [0, CFG.gravityY, 0],
     density: CFG.coinDensity, friction: CFG.coinFriction, restitution: CFG.coinRestitution,
     linDamp: CFG.linDamp, angDamp: CFG.angDamp, contactThreshold: CFG.contactThr, maxv: CFG.coinMaxV,
-    calmV: CFG.calmV, calmW: CFG.calmW, calmFrames: CFG.calmFrames, calmVy: CFG.calmVy, clinkV: CFG.clinkV,
+    calmV: CFG.calmV, calmW: CFG.calmW, calmFrames: CFG.calmFrames, calmVy: CFG.calmVy, calmFlat: CFG.calmFlat, flattenK: CFG.flattenK, clinkV: CFG.clinkV,
   });
   for (let i = 0; i < N; i++) phys.addCoinBody(i, 0, -999, 0);              // пул тел — создать раз
   for (let i = 0; i < N; i++) { if (i < 420) placeAtSource(i); else { C[i].st = 'free'; free.push(i); phys.hideCoin(i); hideM(i); } }

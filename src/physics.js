@@ -13,7 +13,7 @@ export async function initPhysics(opt) {
   const linDamp = opt.linDamp ?? 0.4, angDamp = opt.angDamp ?? 0.6, contactThr = opt.contactThreshold ?? 50;
   const maxv = opt.maxv ?? 0, maxv2 = maxv * maxv;   // потолок скорости монеты (тяжёлый диск не «улетает мячом»); 0=выкл
   // Принудительный сон почти-неподвижных: гасит «вечную качку» монеты на ребре (солвер-джиттер не даёт уснуть штатно).
-  const calmV2 = (opt.calmV ?? 0.25) ** 2, calmW2 = (opt.calmW ?? 0.6) ** 2, calmFrames = opt.calmFrames ?? 22, calmVy = opt.calmVy ?? 0.4;
+  const calmV2 = (opt.calmV ?? 0.25) ** 2, calmW2 = (opt.calmW ?? 0.6) ** 2, calmFrames = opt.calmFrames ?? 22, calmVy = opt.calmVy ?? 0.4, calmFlat = opt.calmFlat ?? 0.45, flattenK = opt.flattenK ?? 8;
 
   await RAPIER.init();   // async WASM (base64 инлайн в -compat → без сети под file://)
 
@@ -114,11 +114,15 @@ export async function initPhysics(opt) {
       const v = b.linvel(); let s = v.x * v.x + v.y * v.y + v.z * v.z;
       if (maxv2 && s > maxv2) { const k = maxv / Math.sqrt(s); b.setLinvel({ x: v.x * k, y: v.y * k, z: v.z * k }, false); s = maxv2; }
       const w = b.angvel(); const sw = w.x * w.x + w.y * w.y + w.z * w.z;
-      // Деадзона КАЖДЫЙ кадр для покоящихся (гасим качку прямо — island-сон не спасает, сосед будит).
-      // |v.y|<calmVy отсекает ПАДАЮЩИЕ (у них v.y≈ g·dt), чтобы не заморозить в воздухе. Сон после calmFrames — экономия CPU.
+      const r = b.rotation();   // ось монеты R·(0,1,0): плашмя ≈ |upy|→1, на ребре ≈ upy→0
+      const upx = 2 * (r.x * r.y - r.w * r.z), upy = 1 - 2 * (r.x * r.x + r.z * r.z), upz = 2 * (r.y * r.z + r.w * r.x);
       if (s < calmV2 && sw < calmW2 && Math.abs(v.y) < calmVy) {
-        b.setLinvel(_ZERO, false); b.setAngvel(_ZERO, false);
-        if (++still[i] >= calmFrames) { b.sleep(); still[i] = 0; }
+        if (Math.abs(upy) > calmFlat) {            // лежит плашмя → заморозить (деадзона + сон)
+          b.setLinvel(_ZERO, false); b.setAngvel(_ZERO, false);
+          if (++still[i] >= calmFrames) { b.sleep(); still[i] = 0; }
+        } else {                                   // почти стоит на ребре → активный «завал»: угл.скорость к мировому верху (up × Y)
+          still[i] = 0; b.setAngvel({ x: -flattenK * upz, y: 0, z: flattenK * upx }, true);
+        }
       } else still[i] = 0;
     }
   }
