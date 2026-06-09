@@ -22,7 +22,24 @@ scene.fog = new THREE.Fog(CFG.bgColor, CFG.fogNear, CFG.fogFar);
 app.appendChild(renderer.domElement);
 const camera = new THREE.PerspectiveCamera(CFG.fov, innerWidth / innerHeight, 0.1, 400);
 scene.add(new THREE.HemisphereLight(0xbfd2e6, 0x4a3b30, 0.6)); const sun = new THREE.DirectionalLight(0xfff0d4, 1.15); sun.position.set(10, 22, 6); scene.add(sun);
-const ground = new THREE.Mesh(new THREE.CircleGeometry(150, 48), new THREE.MeshStandardMaterial({ color: CFG.groundColor, roughness: 1 })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
+// Фактура земли: лавандовая база + бесшовный value-noise (пятна) + зерно. Детерминир. (trig+hash, без rng) → шоты воспроизводимы.
+// Тот же tex как bumpMap (рельеф по красному каналу). repeat → тайлинг по кругу.
+function groundTex() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d');
+  const bc = new THREE.Color(CFG.groundColor), br = bc.r * 255, bg = bc.g * 255, bb = bc.b * 255, TAU = 6.2831853;
+  const img = x.createImageData(S, S), d = img.data;
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    const u = i / S, v = j / S;
+    let n = Math.sin(u * TAU * 3) * Math.cos(v * TAU * 3) * 0.5 + Math.sin(u * TAU * 7 + 1.3) * Math.cos(v * TAU * 5 + 2.1) * 0.25 + Math.sin(u * TAU * 13 + 0.7) * Math.cos(v * TAU * 11 + 4.2) * 0.13;
+    const hh = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453, g = (hh - Math.floor(hh)) - 0.5;   // зерно
+    const k = 1 + n * 0.12 + g * 0.07, o = (j * S + i) * 4;
+    d[o] = Math.min(255, br * k); d[o + 1] = Math.min(255, bg * k); d[o + 2] = Math.min(255, bb * k); d[o + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  const t = srgb(new THREE.CanvasTexture(c)); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 14); return t;
+}
+const groundMap = groundTex();
+const ground = new THREE.Mesh(new THREE.CircleGeometry(150, 48), new THREE.MeshStandardMaterial({ map: groundMap, bumpMap: groundMap, bumpScale: 0.6, roughness: 1 })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
 const rockMat = new THREE.MeshStandardMaterial({ color: 0x7a5fa8, roughness: 1, flatShading: true });
 for (let i = 0; i < 50; i++) { const a = rnd() * 6.28, r = 70 + rnd() * 35, s = 3 + rnd() * 5; const m = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), rockMat); m.position.set(Math.cos(a) * r, s * 0.5 - 0.5, Math.sin(a) * r); m.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3); scene.add(m); }
 
@@ -36,10 +53,12 @@ const purple = new THREE.MeshStandardMaterial({ color: 0x8a4fd6, roughness: .35,
 const glass = new THREE.MeshStandardMaterial({ color: 0x9fe0ff, roughness: .1, metalness: .5, transparent: true, opacity: .7 });
 function box(w, h, d, m, x, y, z, p) { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); (p || dozer).add(b); return b; }
 function cyl(r, h, m, x, y, z, ax, p) { const b = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 16), m); b.position.set(x, y, z); if (ax === 'x') b.rotation.z = Math.PI / 2; if (ax === 'z') b.rotation.x = Math.PI / 2; (p || dozer).add(b); return b; }
+const treads = [];   // блоки протектора — прокручиваются по скорости (вращение гусениц)
+const TREAD_N = 6, TREAD_SP = 0.5, TREAD_SPAN = TREAD_N * TREAD_SP, TREAD_MIN = -1.5;
 for (const sx of [-1, 1]) {   // гусеницы: длинные тёмные, округлые торцы + протектор + ступица
   box(.8, .5, 3.0, dark, sx * 1.0, .42, 0); cyl(.27, .82, dark, sx * 1.0, .42, 1.5, 'x'); cyl(.27, .82, dark, sx * 1.0, .42, -1.5, 'x');
   cyl(.16, .86, steel, sx * 1.0, .42, 0, 'x');
-  for (let z = -1.3; z <= 1.31; z += 0.52) box(.86, .1, .13, tread, sx * 1.0, .66, z);
+  for (let k = 0; k < TREAD_N; k++) treads.push(box(.86, .1, .13, tread, sx * 1.0, .66, TREAD_MIN + k * TREAD_SP));
 }
 box(1.7, .6, 2.1, chassisM, 0, .95, -.05); box(1.5, .46, .9, chassisM, 0, .86, .9); box(1.2, .32, .06, dark, 0, .82, 1.36);   // шасси + капот + решётка
 cyl(.15, .18, steel, -.45, .9, 1.4, 'z'); cyl(.15, .18, steel, .45, .9, 1.4, 'z');                                            // фары
@@ -169,7 +188,7 @@ function emitDust() { const f = Math.sin(state.heading), cf = Math.cos(state.hea
 function emitSparks(x, z, n) { for (let k = 0; k < n; k++) { const a = rnd() * 6.28, sp = 2 + rnd() * 3; emit(x + (rnd() - .5) * 1.5, .4, z + (rnd() - .5) * 1.5, { color: 0xffd86a, life: .4 + rnd() * .2, size: .45, size1: .1, add: true, vy: 2.5 + rnd() * 2, grav: 7, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, fade: 1 }); } }
 
 function setupWorld() {   // монеты-тела создаются в bootPhysics (нужен phys); здесь — статичный мир
-  addGate(0, 20, 0, 10, 150); addGate(0, 40, 0, 100, 2500);
+  addGate(0, 20, 0, 10, CFG.gate1cost); addGate(0, 40, 0, 100, CFG.gate2cost);
   addPad(0, 56, 'НОЖ', 120, () => { UP.bladeHalf += 0.5; blade.scale.x = UP.bladeHalf / 1.6; phys.rebuildBladeCollider(bladeHX(), 0.55, 0.14, CFG.bladeWing, CFG.bladeWingAng); });
   addPad(-18, 9, 'ЗАХВАТ', 150, () => { UP.reach += 0.6; });
   addPad(18, 9, 'ЦЕННОСТЬ', 180, () => { UP.mult *= 1.7; });
@@ -238,14 +257,21 @@ function applyScriptInput() {
   ctrl.desired = null; ctrl.moving = false;
   if (_target) { const dx = _target.x - dozer.position.x, dz = _target.z - dozer.position.z; if (dx * dx + dz * dz > 0.25) { ctrl.desired = Math.atan2(dx, dz); ctrl.moving = true; } }
 }
+let treadPhase = 0;
+function animTracks(dt) {   // прокрутка протектора: вперёд → блоки бегут к корме и заворачиваются (иллюзия вращения)
+  treadPhase += state.speedNow * dt;
+  const ph = ((treadPhase % TREAD_SPAN) + TREAD_SPAN) % TREAD_SPAN;
+  for (let i = 0; i < treads.length; i++) { const k = i % TREAD_N; treads[i].position.z = TREAD_MIN + (((k * TREAD_SP - ph) % TREAD_SPAN) + TREAD_SPAN) % TREAD_SPAN; }
+}
 function simStep(dt) {
   simTime += dt;
   if (ctrl.desired !== null) { let d = ctrl.desired - state.heading; d = Math.atan2(Math.sin(d), Math.cos(d)); state.heading += d * Math.min(1, dt * 7); }
   state.speedNow += ((ctrl.moving ? UP.move : 0) - state.speedNow) * Math.min(1, dt * 5);
   dozer.position.x += Math.sin(state.heading) * state.speedNow * dt; dozer.position.z += Math.cos(state.heading) * state.speedNow * dt;
   dozer.rotation.y = state.heading; dozer.position.y = Math.sin(simTime * 20) * 0.02 * Math.min(1, state.speedNow / 3);
+  animTracks(dt);
   pumpEngine();
-  stepPhysics(dt); pumpClinks(dt);
+  stepPhysics(dt); stepEconomy(dt); pumpClinks(dt);
   if (state.speedNow > 3.5 && rnd() < 0.6) emitDust(); updateParticles(dt);
 }
 /* ФИЗИКА: фикс-шаг 1/60 (детерминизм) + синк инстансов из тел Rapier */
@@ -267,6 +293,41 @@ function stepPhysics(dt) {
   if (TEST) { setKinematicPoses(); phys.step(); }                                  // dt всегда 1/60 → 1 шаг/вызов, fp-точно
   else { _acc += dt; let n = 0; while (_acc >= FIXED && n < MAX_SUB) { setKinematicPoses(); phys.step(); _acc -= FIXED; n++; } }
   syncCoins();
+}
+/* ЭКОНОМИКА на телах: ворота ×N (читают позиции тел), ссып в пад → банк, состояние ворот */
+function stepEconomy(dt) {
+  if (!phys) return;
+  for (let i = 0; i < N; i++) {                                                    // ворота: умножение worth + копии
+    const o = C[i]; if (o.st === 'free') continue;
+    if (o.gateCd > 0) o.gateCd -= dt;
+    if (o.gateCd > 0 || o.worth >= 300) continue;
+    const t = phys.coinPos(i); if (!t || t.y < -100) continue;
+    for (const g of gates) {
+      if (!g.active) continue;
+      const gx = t.x - g.x, gz = t.z - g.z, along = gx * g.n.x + gz * g.n.z, lat = gx * g.right.x + gz * g.right.z;
+      if (Math.abs(along) < 0.7 && Math.abs(lat) < g.halfW) {
+        o.worth *= g.mult; o.gateCd = 0.7;
+        const sp = Math.min(g.mult - 1, 3);
+        for (let k = 0; k < sp; k++) { const fi = free.pop(); if (fi === undefined) break; const f = C[fi]; f.worth = o.worth; f.gateCd = 0.7; f.st = 'rest'; phys.enableCoin(fi); phys.setCoinTransform(fi, t.x + (rnd() - .5), THK * 0.5 + 1 + rnd(), t.z + (rnd() - .5)); }
+        chime('gate'); popup(new THREE.Vector3(g.x, 2.6, g.z), '×' + g.mult, '#7fe6ff'); state.shake += 0.12; break;
+      }
+    }
+  }
+  for (const p of pads) {                                                          // пады: ссып → банк + апгрейд
+    let cnt = 0;
+    for (let i = 0; i < N; i++) {
+      const o = C[i]; if (o.st === 'free') continue;
+      const t = phys.coinPos(i); if (!t || t.y < -100) continue;
+      if (Math.abs(t.x - p.x) < p.half && Math.abs(t.z - p.z) < p.half) { const v = o.worth * UP.mult; p.fill += v; state.bank += v; cnt++; placeAtSource(i); }
+    }
+    if (cnt > 0) {
+      addClinks(Math.min(6, cnt)); emitSparks(p.x, p.z, Math.min(8, cnt));
+      if (p.fill >= p.cost) { p.fill = 0; p.level++; p.cost = Math.round(p.cost * p.grow); p.apply(); chime('upgrade'); state.shake += 0.34; emitSparks(p.x, p.z, 22); drawLabel(p.lbl, 'UPGRADE', p.name + ' ' + fmt(p.cost), '#aef0c0'); p.ghost.scale.setScalar(1 + p.level * 0.06); }
+    }
+    { const r = Math.max(0.001, Math.min(1, p.fill / p.cost)); p.fillBar.scale.y = r; p.fillBar.position.y = p.BOT + p.GH * r * 0.5; }
+  }
+  for (const g of gates) { const a = state.bank >= g.cost; if (a !== g.active) { g.active = a; g.red.visible = !a; g.white.visible = a; } }   // red=locked / white=active
+  updateBank();
 }
 function updateCamera(dt) {
   shadow.position.set(dozer.position.x, 0.04, dozer.position.z);
@@ -291,10 +352,10 @@ window.__sim = {
   get state() { return { x: dozer.position.x, z: dozer.position.z, heading: state.heading, bank: state.bank, speed: state.speedNow }; },
   get coinSum() { if (!phys) return 0; let s = 0; for (let i = 0; i < N; i++) { const t = phys.coinBodies[i].translation(); s += t.x * 1.1 + t.y * 1.7 + t.z * 2.3; } return s; },   // DEBUG детерминизм
   get coinStats() {   // DEBUG: где монеты относительно дозера
-    if (!phys) return null; let n = 0, maxy = -1e9, airborne = 0, ahead = 0, maxv = 0, awake = 0, edge = 0;
+    if (!phys) return null; let n = 0, maxy = -1e9, airborne = 0, ahead = 0, maxv = 0, awake = 0, edge = 0, maxw = 0, scattered = 0;
     const dx = dozer.position.x, dz = dozer.position.z; const _up = new THREE.Vector3();
-    for (let i = 0; i < N; i++) { if (C[i].st === 'free') continue; const b = phys.coinBodies[i]; const t = b.translation(); if (t.y < -100) continue; n++; maxy = Math.max(maxy, t.y); if (t.y > 2) airborne++; const rx = t.x - dx, rz = t.z - dz; if (rz > 0.5 && rz < 4 && Math.abs(rx) < 2) ahead++; const v = b.linvel(); maxv = Math.max(maxv, Math.hypot(v.x, v.y, v.z)); if (!b.isSleeping()) awake++; const r = b.rotation(); _up.set(0, 1, 0).applyQuaternion(_q.set(r.x, r.y, r.z, r.w)); if (Math.abs(_up.y) < 0.5) edge++; }
-    return { n, maxy: +maxy.toFixed(1), airborne, ahead, awake, edge, maxv: +maxv.toFixed(1) };
+    for (let i = 0; i < N; i++) { if (C[i].st === 'free') continue; const b = phys.coinBodies[i]; const t = b.translation(); if (t.y < -100) continue; n++; maxy = Math.max(maxy, t.y); if (t.y > 2) airborne++; const rx = t.x - dx, rz = t.z - dz; if (rz > 0.5 && rz < 4 && Math.abs(rx) < 2) ahead++; const v = b.linvel(); maxv = Math.max(maxv, Math.hypot(v.x, v.y, v.z)); if (!b.isSleeping()) awake++; const r = b.rotation(); _up.set(0, 1, 0).applyQuaternion(_q.set(r.x, r.y, r.z, r.w)); if (Math.abs(_up.y) < 0.5) edge++; maxw = Math.max(maxw, C[i].worth); if (t.z > 14 && t.z < 52) scattered++; }
+    return { n, maxy: +maxy.toFixed(1), airborne, ahead, awake, edge, maxw, scattered, maxv: +maxv.toFixed(1) };
   },
 };
 
