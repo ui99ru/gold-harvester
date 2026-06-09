@@ -24,7 +24,7 @@ export const CFG = {
   bloomThr: 0.82, bloomInten: 0.5,
   // Физика монет (Rapier) — главные регуляторы «ощущения тяжёлого металла», все скаляры → свип через ?key=.
   gravityY: -30, coinDensity: 9.0, coinFriction: 0.95, coinRestitution: 0.02, linDamp: 0.8, angDamp: 0.9, contactThr: 50, coinMaxV: 12,
-  clinkCap: 4, clinkScale: 0.1, clinkV: 0.6,   // звон: макс дзынь/кадр, масштаб от числа ударов, порог скорости «удара»
+  clinkCap: 3, clinkScale: 0.05, clinkV: 0.6,   // звон: макс дзынь/кадр, масштаб от числа ударов, порог скорости «удара»
   calmV: 1.2, calmW: 6.0, calmFrames: 18, calmVy: 0.4,   // деадзона покоящейся монеты: лин./угл. порог + |v.y| (отсекает падающие)
   gate1cost: 150, gate2cost: 2500,   // порог разблокировки ворот (для тестов/тюна)
   laneHalf: 2.8, srcR: 2.4,          // перенос: полуширина коридора-стенок / радиус разброса источника
