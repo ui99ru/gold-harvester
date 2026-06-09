@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { CFG, rnd, TEST, QS } from './config.js';
 import { UP, state, fmt } from './state.js';
 import { audioInit, pumpEngine, pumpClinks, addClinks, chime, toggleMute } from './audio.js';
+import { initPhysics } from './physics.js';
 
 THREE.ColorManagement.enabled = false;   // как в r128: палитра тюнилась без color management; держим паритет
+UP.move = CFG.move;   // скорость дозера управляема через ?move= для свипа «несения»
 
 const srgb = (tex) => { tex.colorSpace = THREE.SRGBColorSpace; return tex; };   // r184: цветные canvas-текстуры в sRGB
 
@@ -47,24 +49,51 @@ cyl(.08, .5, dark, .52, 2.0, 0, 'y'); cyl(.12, .1, dark, .52, 2.27, 0, 'y');    
 box(.38, .4, .38, new THREE.MeshStandardMaterial({ color: 0x6ab04c, roughness: .7 }), 0, 1.66, -.42); box(.44, .18, .44, new THREE.MeshStandardMaterial({ color: 0xf4c542, roughness: .6 }), 0, 1.93, -.42); // водитель
 const blade = box(2.6, .9, .28, purple, 0, .66, 1.62); blade.rotation.x = -0.16;
 box(2.6, .16, .42, purple, 0, .5, .16, blade); box(2.6, .12, .1, steel, 0, -.46, .12, blade);                                 // кромки (children)
+for (const s of [-1, 1]) { const wg = box(.24, .82, .62, purple, s * 1.28, 0, .34, blade); wg.rotation.y = -s * CFG.bladeWingAng; }   // крылья вогнутого отвала (меньше)
 box(.2, .16, 1.2, chassisM, -.95, .55, 1.0); box(.2, .16, 1.2, chassisM, .95, .55, 1.0); scene.add(dozer);                    // рычаги
 const shadow = new THREE.Mesh(new THREE.CircleGeometry(2.2, 24), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .25 })); shadow.rotation.x = -Math.PI / 2; shadow.position.y = .04; scene.add(shadow);
 
 /* DISCRETE COINS */
-const N = 700, THK = 0.17, RAD = 0.46;   // меньше тел ради 60fps под физику (реф и так ограничен §2.1)
-const coinGeo = new THREE.CylinderGeometry(RAD, RAD, THK, 18);
-const coinMat = new THREE.MeshStandardMaterial({ color: CFG.coinColor, metalness: CFG.coinMetal, roughness: CFG.coinRough, emissive: CFG.coinEmissive, emissiveIntensity: CFG.coinEmInt });
-const mesh = new THREE.InstancedMesh(coinGeo, coinMat, N); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(mesh);
-const SC = 0.7, SGN = 300, SGoff = SGN / 2;
-function cellOf(x, z) { return (Math.floor(z / SC) + SGoff) * SGN + (Math.floor(x / SC) + SGoff); }
-const stackH = new Int16Array(SGN * SGN);
-const C = []; for (let i = 0; i < N; i++) C.push({ x: 0, z: 0, y: THK * 0.5, ry: rnd() * 6, tilt: (rnd() - .5) * .5, jx: (rnd() - .5), jz: (rnd() - .5), st: 'free', worth: 1, cell: 0, gateCd: 0, body: null });
-const free = []; const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
-function setM(i) { const o = C[i]; _p.set(o.x, o.y, o.z); _e.set(o.tilt, o.ry, o.tilt * .5); _q.setFromEuler(_e); _s.setScalar(1); _m.compose(_p, _q, _s); mesh.setMatrixAt(i, _m); }
-function hide(i) { _m.compose(_p.set(0, -999, 0), _q.identity(), _s.setScalar(0.0001)); mesh.setMatrixAt(i, _m); }
-function settle(i) { const o = C[i]; o.st = 'rest'; o.cell = cellOf(o.x, o.z); const h = Math.min(stackH[o.cell], 14); o.y = THK * 0.5 + h * THK * 0.9; stackH[o.cell] = h + 1; setM(i); }
+const N = 700, THK = 0.085, RAD = 0.40;   // тонкие диски: ребром почти не встают; меньше тел ради 60fps
+const coinGeo = new THREE.CylinderGeometry(RAD, RAD, THK, 20);   // группы: 0=ребро,1=верх,2=низ → разные материалы
+// Грань монеты: кольцевое углубление + гравированный знак (рельеф через тёмные углубления, map умножается на цвет).
+function coinFaceTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, 128, 128);
+  const g = x.createRadialGradient(64, 60, 22, 64, 64, 64); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(58,36,6,0.32)'); x.fillStyle = g; x.fillRect(0, 0, 128, 128);   // округлость
+  x.lineCap = 'round';
+  x.strokeStyle = 'rgba(58,36,6,0.5)'; x.lineWidth = 5; x.beginPath(); x.arc(64, 64, 50, 0, 6.2832); x.stroke();      // кольцевое углубление
+  x.strokeStyle = 'rgba(255,255,255,0.45)'; x.lineWidth = 2; x.beginPath(); x.arc(64, 64, 46, 0, 6.2832); x.stroke(); // блик-ободок
+  x.save(); x.translate(64, 65); x.fillStyle = 'rgba(58,36,6,0.42)'; x.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 8 : 19; const px = Math.cos(a) * r, py = Math.sin(a) * r; i ? x.lineTo(px, py) : x.moveTo(px, py); }
+  x.closePath(); x.fill(); x.strokeStyle = 'rgba(255,255,255,0.4)'; x.lineWidth = 1; x.stroke();                       // знак-звезда (гравировка)
+  x.restore();
+  return srgb(new THREE.CanvasTexture(c));
+}
+// Карта высот для рельефа (bumpMap, линейная, НЕ sRGB): светлее=выше. Углубления = тёмное → реальная игра света.
+function coinBumpTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  x.fillStyle = '#9a9a9a'; x.fillRect(0, 0, 128, 128);                                                      // поле
+  x.lineCap = 'round';
+  x.strokeStyle = '#e6e6e6'; x.lineWidth = 9; x.beginPath(); x.arc(64, 64, 55, 0, 6.2832); x.stroke();      // приподнятый ободок
+  x.strokeStyle = '#2a2a2a'; x.lineWidth = 7; x.beginPath(); x.arc(64, 64, 46, 0, 6.2832); x.stroke();      // кольцевое УГЛУБЛЕНИЕ
+  x.fillStyle = '#b2b2b2'; x.beginPath(); x.arc(64, 64, 30, 0, 6.2832); x.fill();                           // центральная площадка
+  x.fillStyle = '#262626'; x.save(); x.translate(64, 65); x.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 9 : 21; const px = Math.cos(a) * r, py = Math.sin(a) * r; i ? x.lineTo(px, py) : x.moveTo(px, py); }
+  x.closePath(); x.fill(); x.restore();                                                                     // знак-звезда — углубление
+  return new THREE.CanvasTexture(c);
+}
+const capMat = new THREE.MeshStandardMaterial({ map: coinFaceTex(), bumpMap: coinBumpTex(), bumpScale: 1.4, color: CFG.coinColor, metalness: CFG.coinMetal, roughness: CFG.coinRough, emissive: CFG.coinEmissive, emissiveIntensity: CFG.coinEmInt });
+const sideMat = new THREE.MeshStandardMaterial({ color: 0xc06606, metalness: CFG.coinMetal + 0.05, roughness: CFG.coinRough * 0.9, emissive: CFG.coinEmissive, emissiveIntensity: CFG.coinEmInt });   // ребро темнее
+const mesh = new THREE.InstancedMesh(coinGeo, [sideMat, capMat, capMat], N); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = false; scene.add(mesh);   // монеты по всему полю → культинг съедал весь меш
+// C[i] держит ТОЛЬКО геймплей-метадату; поза/кувырок живут в теле Rapier (phys.coinBodies[i]).
+const C = []; for (let i = 0; i < N; i++) C.push({ st: 'free', worth: 1, gateCd: 0 });
+const free = []; const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3();
+function setMfromBody(i) { if (phys && phys.readCoin(i, _p, _q)) { _m.compose(_p, _q, _s.setScalar(1)); mesh.setMatrixAt(i, _m); } }   // полный кватернион → настоящий кувырок
+function hideM(i) { _m.compose(_p.set(0, -999, 0), _q.identity(), _s.setScalar(0.0001)); mesh.setMatrixAt(i, _m); }
 const SRC = [0, 9];
-function placeAtSource(i) { const a = rnd() * 6.28, r = Math.sqrt(rnd()) * 4.6; const o = C[i]; o.x = SRC[0] + Math.cos(a) * r; o.z = SRC[1] + Math.sin(a) * r; o.worth = 1; o.gateCd = 0; o.tilt = (rnd() - .5) * .5; o.ry = rnd() * 6; settle(i); }
+// respawn/boot: seeded-разброс + падение с высоты (оседают в кучу, не копланарны → солвер стабилен).
+function placeAtSource(i) { const a = rnd() * 6.28, r = Math.sqrt(rnd()) * 4.0, y = THK * 0.5 + rnd() * 6.0; const o = C[i]; o.worth = 1; o.gateCd = 0; o.st = 'rest'; phys.enableCoin(i); phys.setCoinTransform(i, SRC[0] + Math.cos(a) * r, y, SRC[1] + Math.sin(a) * r); }
 
 /* GATES + PADS */
 const gates = [];
@@ -139,11 +168,9 @@ function updateParticles(dt) { for (const p of PT) { if (p.life <= 0) continue; 
 function emitDust() { const f = Math.sin(state.heading), cf = Math.cos(state.heading); const bx = dozer.position.x - f * 1.6, bz = dozer.position.z - cf * 1.6; for (const sx of [-0.9, 0.9]) emit(bx + cf * sx + (rnd() - .5) * .3, .18, bz - f * sx + (rnd() - .5) * .3, { color: 0xb8b2c6, life: .55, size: .5, size1: 1.3, vy: .5, grav: .4, vx: (rnd() - .5) * .6, vz: (rnd() - .5) * .6, fade: .55 }); }
 function emitSparks(x, z, n) { for (let k = 0; k < n; k++) { const a = rnd() * 6.28, sp = 2 + rnd() * 3; emit(x + (rnd() - .5) * 1.5, .4, z + (rnd() - .5) * 1.5, { color: 0xffd86a, life: .4 + rnd() * .2, size: .45, size1: .1, add: true, vy: 2.5 + rnd() * 2, grav: 7, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, fade: 1 }); } }
 
-function setupWorld() {
-  for (let i = 0; i < N; i++) { if (i < 420) placeAtSource(i); else { C[i].st = 'free'; free.push(i); hide(i); } }
-  mesh.instanceMatrix.needsUpdate = true;
+function setupWorld() {   // монеты-тела создаются в bootPhysics (нужен phys); здесь — статичный мир
   addGate(0, 20, 0, 10, 150); addGate(0, 40, 0, 100, 2500);
-  addPad(0, 56, 'НОЖ', 120, () => { UP.bladeHalf += 0.5; blade.scale.x = UP.bladeHalf / 1.6; });
+  addPad(0, 56, 'НОЖ', 120, () => { UP.bladeHalf += 0.5; blade.scale.x = UP.bladeHalf / 1.6; phys.rebuildBladeCollider(bladeHX(), 0.55, 0.14, CFG.bladeWing, CFG.bladeWingAng); });
   addPad(-18, 9, 'ЗАХВАТ', 150, () => { UP.reach += 0.6; });
   addPad(18, 9, 'ЦЕННОСТЬ', 180, () => { UP.mult *= 1.7; });
   updateBank();
@@ -156,48 +183,6 @@ renderer.domElement.addEventListener('pointerdown', e => { if (state.phase === '
 renderer.domElement.addEventListener('pointermove', e => { if (state.driving) setP(e); });
 addEventListener('pointerup', () => state.driving = false);
 addEventListener('keydown', e => keys[e.key.toLowerCase()] = true); addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-
-/* HEAVY PUSH (blade as wall) + economy — позиционная модель (физика придёт отдельным модулем) */
-function stepPush(dt) {
-  const px = dozer.position.x, pz = dozer.position.z, h = state.heading, sn = Math.sin(h), cs = Math.cos(h);
-  const FRONT = 1.95, half = UP.bladeHalf, cap = 8, LANE = RAD * 1.7;
-  const lanes = {};
-  for (let i = 0; i < N; i++) {
-    const o = C[i]; if (o.st === 'free') continue;
-    const dx = o.x - px, dz = o.z - pz; const lz = dx * sn + dz * cs, lx = dx * cs - dz * sn;
-    const inZone = Math.abs(lx) < half + 0.15 && lz > 0.0 && lz < FRONT + 0.5;
-    if (inZone) {
-      if (o.st === 'rest') { stackH[o.cell] = Math.max(0, stackH[o.cell] - 1); o.st = 'active'; }
-      const lane = Math.round(lx / LANE); let cnt = lanes[lane] || 0; lanes[lane] = cnt + 1;
-      let nlx = lane * LANE + o.jx * RAD * 0.5, nlz = FRONT + o.jz * 0.25, yy = THK * 0.5 + Math.min(cnt, cap) * THK * 0.95;
-      if (cnt >= cap) { nlx = (lx >= 0 ? 1 : -1) * (half + 0.35); nlz = FRONT - 0.3; yy = THK * 0.5; }
-      o.x = px + sn * nlz + cs * nlx; o.z = pz + cs * nlz - sn * nlx; o.y = yy; o.ry += dt * 4; setM(i);
-      if (o.gateCd > 0) o.gateCd -= dt;
-      for (const g of gates) {
-        if (o.gateCd > 0 || o.worth >= 300) break; if (!g.active) continue; const gx = o.x - g.x, gz = o.z - g.z; const along = gx * g.n.x + gz * g.n.z; const lat = gx * g.right.x + gz * g.right.z;
-        if (Math.abs(along) < 0.7 && Math.abs(lat) < g.halfW) {
-          o.worth *= g.mult; o.gateCd = 0.7;
-          const sp = Math.min(g.mult - 1, 3); for (let k = 0; k < sp; k++) { const fi = free.pop(); if (fi === undefined) break; const f = C[fi]; f.x = o.x + (rnd() - .5); f.z = o.z + (rnd() - .5); f.worth = o.worth; f.gateCd = 0.7; settle(fi); }
-          chime('gate'); popup(new THREE.Vector3(g.x, 2.6, g.z), '×' + g.mult, '#7fe6ff'); state.shake += 0.12;
-        }
-      }
-    } else if (o.st === 'active') { settle(i); }
-  }
-  for (const p of pads) {
-    let cnt = 0;
-    for (let i = 0; i < N; i++) {
-      const o = C[i]; if (o.st === 'free') continue;
-      if (Math.abs(o.x - p.x) < p.half && Math.abs(o.z - p.z) < p.half) { if (o.st === 'rest') stackH[o.cell] = Math.max(0, stackH[o.cell] - 1); const v = o.worth * UP.mult; p.fill += v; state.bank += v; cnt++; placeAtSource(i); }
-    }
-    if (cnt > 0) {
-      addClinks(Math.min(6, cnt)); emitSparks(p.x, p.z, Math.min(8, cnt));
-      if (p.fill >= p.cost) { p.fill = 0; p.level++; p.cost = Math.round(p.cost * p.grow); p.apply(); chime('upgrade'); state.shake += 0.34; emitSparks(p.x, p.z, 22); drawLabel(p.lbl, 'UPGRADE', p.name + ' ' + fmt(p.cost), '#aef0c0'); p.ghost.scale.setScalar(1 + p.level * 0.06); }
-    }
-    { const r = Math.max(0.001, Math.min(1, p.fill / p.cost)); p.fillBar.scale.y = r; p.fillBar.position.y = p.BOT + p.GH * r * 0.5; }
-  }
-  for (const g of gates) { const a = state.bank >= g.cost; if (a !== g.active) { g.active = a; g.red.visible = !a; g.white.visible = a; } }
-  mesh.instanceMatrix.needsUpdate = true; updateBank();
-}
 
 /* BLOOM (самодостаточный, под защитой; r184: без outputEncoding — RT линейный по умолчанию) */
 let usePost = false, rtScene, rtA, rtB, qs, qc, quad, mBright, mBlur, mComp;
@@ -222,8 +207,22 @@ function renderPost() {
 }
 
 /* FLOW */
+let phys = null;
+async function bootPhysics() {
+  phys = await initPhysics({
+    count: N, thk: THK, rad: RAD, gravity: [0, CFG.gravityY, 0],
+    density: CFG.coinDensity, friction: CFG.coinFriction, restitution: CFG.coinRestitution,
+    linDamp: CFG.linDamp, angDamp: CFG.angDamp, contactThreshold: CFG.contactThr, maxv: CFG.coinMaxV,
+    calmV: CFG.calmV, calmW: CFG.calmW, calmFrames: CFG.calmFrames, calmVy: CFG.calmVy,
+  });
+  for (let i = 0; i < N; i++) phys.addCoinBody(i, 0, -999, 0);              // пул тел — создать раз
+  for (let i = 0; i < N; i++) { if (i < 420) placeAtSource(i); else { C[i].st = 'free'; free.push(i); phys.hideCoin(i); hideM(i); } }
+  phys.addBlade(bladeHX(), 0.55, 0.14, CFG.bladeWing, CFG.bladeWingAng); phys.addChassis(1.3, 0.5, 1.5);   // нож-плуг + корпус
+  syncCoins(); mesh.instanceMatrix.needsUpdate = true;
+}
 function start() { if (!TEST) audioInit(); document.getElementById('start').classList.add('hidden'); document.getElementById('bank').classList.remove('hidden'); document.getElementById('mute').classList.remove('hidden'); setupWorld(); state.phase = 'play'; }
-document.getElementById('startBtn').onclick = start;
+async function bootAndStart() { start(); await bootPhysics(); window.__sim.ready = true; }   // ready ТОЛЬКО после WASM+тел
+document.getElementById('startBtn').onclick = () => bootAndStart();
 document.getElementById('mute').onclick = function () { const m = toggleMute(); this.textContent = m ? '🔇' : '🔊'; };
 
 /* SIM STEP (детерминированный, отделён от rAF) */
@@ -246,8 +245,28 @@ function simStep(dt) {
   dozer.position.x += Math.sin(state.heading) * state.speedNow * dt; dozer.position.z += Math.cos(state.heading) * state.speedNow * dt;
   dozer.rotation.y = state.heading; dozer.position.y = Math.sin(simTime * 20) * 0.02 * Math.min(1, state.speedNow / 3);
   pumpEngine();
-  stepPush(dt); pumpClinks(dt);
+  stepPhysics(dt); pumpClinks(dt);
   if (state.speedNow > 3.5 && rnd() < 0.6) emitDust(); updateParticles(dt);
+}
+/* ФИЗИКА: фикс-шаг 1/60 (детерминизм) + синк инстансов из тел Rapier */
+const FIXED = 1 / 60, MAX_SUB = 5; let _acc = 0;
+function bladeHX() { return 1.3 * (UP.bladeHalf / 1.6); }        // полуширина коллайдера = визуальная ширина ножа
+// Нож = вертикальная стенка ДО земли (коллайдер отвязан от наклонного визуала — плоские диски top y≈0.17,
+// иначе нож проходит НАД ними). Едет через setNextKinematic* → Rapier выводит скорость и сгребает монеты импульсом.
+const BLADE_FWD = 1.62;   // нож впереди дозера (local z визуала)
+function setKinematicPoses() {
+  if (!phys) return;
+  const h = state.heading, sn = Math.sin(h), cs = Math.cos(h), h2 = h * 0.5;
+  const qy = { x: 0, y: Math.sin(h2), z: 0, w: Math.cos(h2) };   // yaw-only
+  phys.setBladePose(dozer.position.x + sn * BLADE_FWD, 0.5, dozer.position.z + cs * BLADE_FWD, qy);   // стенка y∈[-0.05,1.05]
+  phys.setChassisPose(dozer.position.x, 0.5, dozer.position.z, qy);
+}
+function syncCoins() { for (let i = 0; i < N; i++) { if (C[i].st === 'free') continue; setMfromBody(i); } mesh.instanceMatrix.needsUpdate = true; }
+function stepPhysics(dt) {
+  if (!phys) return;
+  if (TEST) { setKinematicPoses(); phys.step(); }                                  // dt всегда 1/60 → 1 шаг/вызов, fp-точно
+  else { _acc += dt; let n = 0; while (_acc >= FIXED && n < MAX_SUB) { setKinematicPoses(); phys.step(); _acc -= FIXED; n++; } }
+  syncCoins();
 }
 function updateCamera(dt) {
   shadow.position.set(dozer.position.x, 0.04, dozer.position.z);
@@ -270,6 +289,13 @@ window.__sim = {
   setPose(p) { dozer.position.x = p.x; dozer.position.z = p.z; state.heading = p.heading || 0; dozer.rotation.y = state.heading; },
   render() { updateCamera(0); renderFrame(); },
   get state() { return { x: dozer.position.x, z: dozer.position.z, heading: state.heading, bank: state.bank, speed: state.speedNow }; },
+  get coinSum() { if (!phys) return 0; let s = 0; for (let i = 0; i < N; i++) { const t = phys.coinBodies[i].translation(); s += t.x * 1.1 + t.y * 1.7 + t.z * 2.3; } return s; },   // DEBUG детерминизм
+  get coinStats() {   // DEBUG: где монеты относительно дозера
+    if (!phys) return null; let n = 0, maxy = -1e9, airborne = 0, ahead = 0, maxv = 0, awake = 0, edge = 0;
+    const dx = dozer.position.x, dz = dozer.position.z; const _up = new THREE.Vector3();
+    for (let i = 0; i < N; i++) { if (C[i].st === 'free') continue; const b = phys.coinBodies[i]; const t = b.translation(); if (t.y < -100) continue; n++; maxy = Math.max(maxy, t.y); if (t.y > 2) airborne++; const rx = t.x - dx, rz = t.z - dz; if (rz > 0.5 && rz < 4 && Math.abs(rx) < 2) ahead++; const v = b.linvel(); maxv = Math.max(maxv, Math.hypot(v.x, v.y, v.z)); if (!b.isSleeping()) awake++; const r = b.rotation(); _up.set(0, 1, 0).applyQuaternion(_q.set(r.x, r.y, r.z, r.w)); if (Math.abs(_up.y) < 0.5) edge++; }
+    return { n, maxy: +maxy.toFixed(1), airborne, ahead, awake, edge, maxv: +maxv.toFixed(1) };
+  },
 };
 
 /* LOOP */
@@ -285,5 +311,5 @@ function resize() {
   if (usePost) { const w = Math.floor(innerWidth * Math.min(devicePixelRatio, 2)), h = Math.floor(innerHeight * Math.min(devicePixelRatio, 2)); rtScene.setSize(w, h); rtA.setSize(w >> 1, h >> 1); rtB.setSize(w >> 1, h >> 1); }
 }
 initBloom(); addEventListener('resize', resize); resize();
-if (TEST) { start(); window.__sim.ready = true; }   // авто-старт без кнопки/звука
+if (TEST) bootAndStart();   // авто-старт без кнопки/звука; ready флипнётся после await bootPhysics
 requestAnimationFrame(tick);

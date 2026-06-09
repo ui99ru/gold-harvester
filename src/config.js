@@ -21,6 +21,11 @@ export const CFG = {
   coinColor: 0xdc7407, coinMetal: 0.30, coinRough: 0.52, coinEmissive: 0x9c3c00, coinEmInt: 0.05,
   gateCurtain: 0x5ac8ff, gateGlow: 0x39c8ff,
   bloomThr: 0.82, bloomInten: 0.5,
+  // Физика монет (Rapier) — главные регуляторы «ощущения тяжёлого металла», все скаляры → свип через ?key=.
+  gravityY: -30, coinDensity: 9.0, coinFriction: 0.95, coinRestitution: 0.02, linDamp: 0.8, angDamp: 0.9, contactThr: 50, coinMaxV: 12,
+  calmV: 1.2, calmW: 6.0, calmFrames: 18, calmVy: 0.4,   // деадзона покоящейся монеты: лин./угл. порог + |v.y| (отсекает падающие)
+  bladeWing: 0.5, bladeWingAng: 0.3,    // вогнутый отвал: длина крыла / угол toe-in (рад) — крылья меньше
+  move: 10,   // скорость дозера (она же цель апгрейда); низкая → монеты успевают сгрестись, не разлетаются
 };
 const _o = window.__cfg || {};
 for (const k in _o) if (k in CFG) CFG[k] = _o[k];
