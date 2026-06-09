@@ -40,8 +40,8 @@ def masks(rgb):
     for x0, y0, x1, y1 in OVERLAYS:
         y0c, y1c = min(y0, h), min(y1, h)
         valid[y0c:y1c, x0:x1] = False
-    gold = (H >= 14) & (H <= 46) & (S > 95) & (V > 90) & valid       # тёплое золото
-    ground = (~gold) & (S < 60) & (V > 60) & valid                  # серый/лавандовый грунт
+    gold = (H >= 12) & (H <= 48) & (S > 80) & (V > 80) & valid       # тёплое золото (по hue)
+    ground = (~gold) & (H >= 150) & (H <= 220) & (S > 25) & (V > 40) & valid   # сине-фиолетовый грунт (по hue, насыщенный)
     luma = (0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]) / 255.0
     return gold, ground, luma, valid
 

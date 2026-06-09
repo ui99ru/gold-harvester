@@ -102,8 +102,8 @@ function coinBumpTex() {
   x.closePath(); x.fill(); x.restore();                                                                     // знак-звезда — углубление
   return new THREE.CanvasTexture(c);
 }
-const capMat = new THREE.MeshStandardMaterial({ map: coinFaceTex(), bumpMap: coinBumpTex(), bumpScale: 1.4, color: CFG.coinColor, metalness: CFG.coinMetal, roughness: CFG.coinRough, emissive: CFG.coinEmissive, emissiveIntensity: CFG.coinEmInt, envMapIntensity: 1.5 });
-const sideMat = new THREE.MeshStandardMaterial({ color: 0xe0a52e, metalness: CFG.coinMetal + 0.05, roughness: CFG.coinRough * 0.9, emissive: CFG.coinEmissive, emissiveIntensity: CFG.coinEmInt, envMapIntensity: 1.5 });   // ребро чуть темнее золота
+const capMat = new THREE.MeshStandardMaterial({ map: coinFaceTex(), bumpMap: coinBumpTex(), bumpScale: 1.4, color: CFG.coinColor, metalness: CFG.coinMetal, roughness: CFG.coinRough, emissive: CFG.coinEmissive, emissiveIntensity: CFG.coinEmInt, envMapIntensity: 0.8 });
+const sideMat = new THREE.MeshStandardMaterial({ color: 0xe0a52e, metalness: CFG.coinMetal + 0.05, roughness: CFG.coinRough * 0.9, emissive: CFG.coinEmissive, emissiveIntensity: CFG.coinEmInt, envMapIntensity: 0.8 });   // ребро чуть темнее золота
 const mesh = new THREE.InstancedMesh(coinGeo, [sideMat, capMat, capMat], N); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = false; scene.add(mesh);   // монеты по всему полю → культинг съедал весь меш
 // C[i] держит ТОЛЬКО геймплей-метадату; поза/кувырок живут в теле Rapier (phys.coinBodies[i]).
 const C = []; for (let i = 0; i < N; i++) C.push({ st: 'free', worth: 1, gateCd: 0 });
@@ -186,7 +186,7 @@ function emit(x, y, z, o) {
   p.s.visible = true; p.s.position.set(x, y, z); p.s.material.color.setHex(o.color); p.s.material.opacity = o.fade; p.s.material.blending = o.add ? THREE.AdditiveBlending : THREE.NormalBlending; p.s.scale.setScalar(o.size);
 }
 function updateParticles(dt) { for (const p of PT) { if (p.life <= 0) continue; p.life -= dt; if (p.life <= 0) { p.s.visible = false; continue; } p.vy -= p.grav * dt; p.s.position.x += p.vx * dt; p.s.position.y += p.vy * dt; p.s.position.z += p.vz * dt; const t = p.life / p.max; p.s.material.opacity = t * p.fade; p.s.scale.setScalar(p.s0 + (p.s1 - p.s0) * (1 - t)); } }
-function emitDust() { const f = Math.sin(state.heading), cf = Math.cos(state.heading); const bx = dozer.position.x - f * 1.6, bz = dozer.position.z - cf * 1.6; for (const sx of [-0.9, 0.9]) emit(bx + cf * sx + (rnd() - .5) * .3, .18, bz - f * sx + (rnd() - .5) * .3, { color: 0xb8b2c6, life: .55, size: .5, size1: 1.3, vy: .5, grav: .4, vx: (rnd() - .5) * .6, vz: (rnd() - .5) * .6, fade: .55 }); }
+function emitDust() { const f = Math.sin(state.heading), cf = Math.cos(state.heading); const bx = dozer.position.x - f * 1.6, bz = dozer.position.z - cf * 1.6; for (const sx of [-0.9, 0.9]) emit(bx + cf * sx + (rnd() - .5) * .3, .18, bz - f * sx + (rnd() - .5) * .3, { color: 0x9a92a8, life: .55, size: .5, size1: 1.3, vy: .5, grav: .4, vx: (rnd() - .5) * .6, vz: (rnd() - .5) * .6, fade: .32 }); }
 function emitSparks(x, z, n) { for (let k = 0; k < n; k++) { const a = rnd() * 6.28, sp = 2 + rnd() * 3; emit(x + (rnd() - .5) * 1.5, .4, z + (rnd() - .5) * 1.5, { color: 0xffd86a, life: .4 + rnd() * .2, size: .45, size1: .1, add: true, vy: 2.5 + rnd() * 2, grav: 7, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, fade: 1 }); } }
 
 function setupWorld() {   // монеты-тела создаются в bootPhysics (нужен phys); здесь — статичный мир
