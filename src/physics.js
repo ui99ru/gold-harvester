@@ -77,23 +77,31 @@ export async function initPhysics(opt) {
     world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.3).setRestitution(0), b);
   }
 
-  // ── Кинематика: нож-плуг + шасси «грабли» ────────────────────────────────
+  // ── Кинематика: ковш-совок + шасси ───────────────────────────────────────
   let bladeBody = null, bladeColliders = [], chassisBody = null;
-  const yquat = (a) => ({ x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) });
-  // Вогнутый отвал: центр-стенка + 2 крыла вперёд-внутрь (toe-in) → диски сходятся к центру, не брызгают вбок.
-  function buildPlow(hx, hy, hz, wing, ang) {
+  const xquat = (a) => ({ x: Math.sin(a / 2), y: 0, z: 0, w: Math.cos(a / 2) });
+  // Ковш-корыто (C-профиль): дно сегментами дуги загибается в высокую вогнутую спинку, сплошные щёки,
+  // передняя кромка до земли (монеты заезжают внутрь). Тело на y=0, офсеты в коллайдерах.
+  function buildPlow(hx) {
     const mk = (cd) => bladeColliders.push(world.createCollider(cd.setFriction(0.8).setRestitution(0.05), bladeBody));
-    mk(RAPIER.ColliderDesc.cuboid(hx, hy, hz));                                                                   // центр
-    for (const s of [-1, 1]) mk(RAPIER.ColliderDesc.cuboid(hz, hy, wing).setTranslation(s * hx, 0, wing * 0.92).setRotation(yquat(-s * ang)));   // крылья
+    mk(RAPIER.ColliderDesc.cuboid(hx, 0.50, 0.08).setTranslation(0, 0.60, -0.05));                                  // спинка (верх ~1.1)
+    mk(RAPIER.ColliderDesc.cuboid(hx + 0.02, 0.03, 0.26).setTranslation(0, 0.40, 0.10).setRotation(xquat(-0.95)));  // дуга: верхний сегмент
+    mk(RAPIER.ColliderDesc.cuboid(hx + 0.02, 0.03, 0.30).setTranslation(0, 0.13, 0.46).setRotation(xquat(-0.42)));  // дуга: нижний сегмент
+    mk(RAPIER.ColliderDesc.cuboid(hx + 0.05, 0.03, 0.42).setTranslation(0, 0.03, 1.05));                            // дно (верх ~0.06)
+    mk(RAPIER.ColliderDesc.cuboid(hx + 0.05, 0.02, 0.20).setTranslation(0, 0.012, 1.62).setRotation(xquat(0.12)));  // кромка до земли
+    for (const s of [-1, 1]) {                                                                                       // щёки: высокая задняя + скошенная передняя
+      mk(RAPIER.ColliderDesc.cuboid(0.05, 0.45, 0.45).setTranslation(s * (hx + 0.03), 0.50, 0.18));
+      mk(RAPIER.ColliderDesc.cuboid(0.05, 0.16, 0.60).setTranslation(s * (hx + 0.03), 0.16, 0.98));
+    }
   }
-  function addBlade(hx, hy, hz, wing, ang) {
+  function addBlade(hx) {
     bladeBody = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -50, 0));
-    buildPlow(hx, hy, hz, wing, ang);
+    buildPlow(hx);
   }
-  function rebuildBladeCollider(hx, hy, hz, wing, ang) {   // апгрейд «НОЖ»: редко → destroy/recreate ок
+  function rebuildBladeCollider(hx) {   // апгрейд «НОЖ»: редко → destroy/recreate ок
     if (!bladeBody) return;
     for (const c of bladeColliders) world.removeCollider(c, false);
-    bladeColliders = []; buildPlow(hx, hy, hz, wing, ang);
+    bladeColliders = []; buildPlow(hx);
   }
   // boxes: [{hx,hy,hz, cx,cy,cz}] — несколько коллайдеров на одном кинематическом теле (тело в основании дозера, y=0).
   function addChassis(boxes) {
