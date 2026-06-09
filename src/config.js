@@ -18,13 +18,14 @@ export function rnd() { return _rng(); }   // = Math.random в обычном р
 export const CFG = {
   exposure: 0.56, bgColor: 0x33304a, groundColor: 0x504c5e, fogNear: 60, fogFar: 170,
   fov: 52, camHeight: 19, camBack: 27, lookAhead: 14, camYaw: -0.6,
-  coinColor: 0xdc7407, coinMetal: 0.30, coinRough: 0.52, coinEmissive: 0x9c3c00, coinEmInt: 0.05,
+  coinColor: 0xffc63c, coinMetal: 0.55, coinRough: 0.30, coinEmissive: 0x9c5a00, coinEmInt: 0.10,   // яркое светлое золото (металл + блик), не латунь
   gateCurtain: 0x5ac8ff, gateGlow: 0x39c8ff,
   bloomThr: 0.82, bloomInten: 0.5,
   // Физика монет (Rapier) — главные регуляторы «ощущения тяжёлого металла», все скаляры → свип через ?key=.
   gravityY: -30, coinDensity: 9.0, coinFriction: 0.95, coinRestitution: 0.02, linDamp: 0.8, angDamp: 0.9, contactThr: 50, coinMaxV: 12,
   calmV: 1.2, calmW: 6.0, calmFrames: 18, calmVy: 0.4,   // деадзона покоящейся монеты: лин./угл. порог + |v.y| (отсекает падающие)
   gate1cost: 150, gate2cost: 2500,   // порог разблокировки ворот (для тестов/тюна)
+  laneHalf: 2.8, srcR: 2.4,          // перенос: полуширина коридора-стенок / радиус разброса источника
   bladeWing: 0.5, bladeWingAng: 0.3,    // вогнутый отвал: длина крыла / угол toe-in (рад) — крылья меньше
   move: 10,   // скорость дозера (она же цель апгрейда); низкая → монеты успевают сгрестись, не разлетаются
 };

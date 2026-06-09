@@ -71,6 +71,12 @@ export async function initPhysics(opt) {
   function coinPos(i) { const b = coinBodies[i]; return b ? b.translation() : null; }
   function isEnabled(i) { const b = coinBodies[i]; return b ? b.isEnabled() : false; }
 
+  // Стенка-коллайдер (fixed): коридор удерживает монеты в полосе ворот (дозер кинематический → проходит сквозь).
+  function addWall(cx, cy, cz, hx, hy, hz) {
+    const b = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(cx, cy, cz));
+    world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.3).setRestitution(0), b);
+  }
+
   // ── Кинематика: нож-плуг + шасси «грабли» ────────────────────────────────
   let bladeBody = null, bladeColliders = [], chassisBody = null;
   const yquat = (a) => ({ x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) });
@@ -89,9 +95,10 @@ export async function initPhysics(opt) {
     for (const c of bladeColliders) world.removeCollider(c, false);
     bladeColliders = []; buildPlow(hx, hy, hz, wing, ang);
   }
-  function addChassis(hx, hy, hz) {
+  // boxes: [{hx,hy,hz, cx,cy,cz}] — несколько коллайдеров на одном кинематическом теле (тело в основании дозера, y=0).
+  function addChassis(boxes) {
     chassisBody = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -50, 0));
-    world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.6), chassisBody);
+    for (const b of boxes) { const cd = RAPIER.ColliderDesc.cuboid(b.hx, b.hy, b.hz).setFriction(0.5).setRestitution(0).setTranslation(b.cx || 0, b.cy || 0, b.cz || 0); world.createCollider(cd, chassisBody); }
   }
   // двигать через setNextKinematic* (НЕ setTranslation — иначе ноль импульса монетам → мёртвое сгребание).
   function setBladePose(x, y, z, q) { if (!bladeBody) return; bladeBody.setNextKinematicTranslation({ x, y, z }); if (q) bladeBody.setNextKinematicRotation(q); }
@@ -118,7 +125,7 @@ export async function initPhysics(opt) {
 
   return {
     addCoinBody, setCoinTransform, hideCoin, enableCoin, readCoin, coinPos, isEnabled,
-    addBlade, rebuildBladeCollider, addChassis, setBladePose, setChassisPose,
+    addWall, addBlade, rebuildBladeCollider, addChassis, setBladePose, setChassisPose,
     step, drainContacts,
     world, coinBodies, RAPIER,
   };
