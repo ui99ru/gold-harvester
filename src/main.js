@@ -21,7 +21,7 @@ const env = new THREE.DataTexture(eg, 16, 64, THREE.RGBAFormat); env.mapping = T
 scene.fog = new THREE.Fog(CFG.bgColor, CFG.fogNear, CFG.fogFar);
 app.appendChild(renderer.domElement);
 const camera = new THREE.PerspectiveCamera(CFG.fov, innerWidth / innerHeight, 0.1, 400);
-scene.add(new THREE.HemisphereLight(0xbfd2e6, 0x4a3b30, 0.6)); const sun = new THREE.DirectionalLight(0xfff0d4, 1.15); sun.position.set(10, 22, 6); scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xcfe0f5, 0x5a4a40, CFG.hemiInt)); const sun = new THREE.DirectionalLight(0xfff4de, CFG.sunInt); sun.position.set(10, 22, 6); scene.add(sun);
 // Фактура земли: лавандовая база + бесшовный value-noise (пятна) + зерно. Детерминир. (trig+hash, без rng) → шоты воспроизводимы.
 // Тот же tex как bumpMap (рельеф по красному каналу). repeat → тайлинг по кругу.
 function groundTex() {
@@ -40,7 +40,7 @@ function groundTex() {
 }
 const groundMap = groundTex();
 const ground = new THREE.Mesh(new THREE.CircleGeometry(150, 48), new THREE.MeshStandardMaterial({ map: groundMap, bumpMap: groundMap, bumpScale: 0.6, roughness: 1 })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
-const rockMat = new THREE.MeshStandardMaterial({ color: 0x7a5fa8, roughness: 1, flatShading: true });
+const rockMat = new THREE.MeshStandardMaterial({ color: 0x8f72c8, roughness: 1, flatShading: true });
 for (let i = 0; i < 50; i++) { const a = rnd() * 6.28, r = 70 + rnd() * 35, s = 3 + rnd() * 5; const m = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), rockMat); m.position.set(Math.cos(a) * r, s * 0.5 - 0.5, Math.sin(a) * r); m.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3); scene.add(m); }
 
 /* DOZER (детальная миниатюра: фиолетовое шасси, синяя кабина, тёмные гусеницы, фары) */
