@@ -234,7 +234,7 @@ async function bootPhysics() {
     count: N, thk: THK, rad: RAD, gravity: [0, CFG.gravityY, 0],
     density: CFG.coinDensity, friction: CFG.coinFriction, restitution: CFG.coinRestitution,
     linDamp: CFG.linDamp, angDamp: CFG.angDamp, contactThreshold: CFG.contactThr, maxv: CFG.coinMaxV,
-    calmV: CFG.calmV, calmW: CFG.calmW, calmFrames: CFG.calmFrames, calmVy: CFG.calmVy,
+    calmV: CFG.calmV, calmW: CFG.calmW, calmFrames: CFG.calmFrames, calmVy: CFG.calmVy, clinkV: CFG.clinkV,
   });
   for (let i = 0; i < N; i++) phys.addCoinBody(i, 0, -999, 0);              // пул тел — создать раз
   for (let i = 0; i < N; i++) { if (i < 420) placeAtSource(i); else { C[i].st = 'free'; free.push(i); phys.hideCoin(i); hideM(i); } }
@@ -301,10 +301,14 @@ function setKinematicPoses() {
   phys.setChassisPose(dozer.position.x, 0, dozer.position.z, qy);   // тело в основании (y=0); коллайдеры со своими офсетами
 }
 function syncCoins() { for (let i = 0; i < N; i++) { if (C[i].st === 'free') continue; setMfromBody(i); } mesh.instanceMatrix.needsUpdate = true; }
+let lastContacts = 0;
 function stepPhysics(dt) {
   if (!phys) return;
-  if (TEST) { setKinematicPoses(); phys.step(); }                                  // dt всегда 1/60 → 1 шаг/вызов, fp-точно
-  else { _acc += dt; let n = 0; while (_acc >= FIXED && n < MAX_SUB) { setKinematicPoses(); phys.step(); _acc -= FIXED; n++; } }
+  let cl = 0; const drain = () => phys.drainContacts(() => cl++);   // контакт-форс события (спящие монеты не генерят → нет спама в покое)
+  if (TEST) { setKinematicPoses(); phys.step(); drain(); }                          // dt всегда 1/60 → 1 шаг/вызов, fp-точно
+  else { _acc += dt; let n = 0; while (_acc >= FIXED && n < MAX_SUB) { setKinematicPoses(); phys.step(); drain(); _acc -= FIXED; n++; } }
+  lastContacts = cl;
+  if (cl > 0) addClinks(Math.min(CFG.clinkCap, Math.ceil(cl * CFG.clinkScale)));    // удар монет → звон (pumpClinks лимитит 25Гц)
   syncCoins();
 }
 /* ЭКОНОМИКА на телах: ворота ×N (читают позиции тел), ссып в пад → банк, состояние ворот */
@@ -364,6 +368,7 @@ window.__sim = {
   render() { updateCamera(0); renderFrame(); },
   get state() { return { x: dozer.position.x, z: dozer.position.z, heading: state.heading, bank: state.bank, speed: state.speedNow }; },
   get coinSum() { if (!phys) return 0; let s = 0; for (let i = 0; i < N; i++) { const t = phys.coinBodies[i].translation(); s += t.x * 1.1 + t.y * 1.7 + t.z * 2.3; } return s; },   // DEBUG детерминизм
+  get contacts() { return lastContacts; },   // DEBUG контакт-события за шаг
   get coinStats() {   // DEBUG: где монеты относительно дозера
     if (!phys) return null; let n = 0, maxy = -1e9, airborne = 0, ahead = 0, maxv = 0, awake = 0, edge = 0, maxw = 0, scattered = 0, onbody = 0;
     const dx = dozer.position.x, dz = dozer.position.z, h = state.heading, sn = Math.sin(h), cs = Math.cos(h); const _up = new THREE.Vector3();

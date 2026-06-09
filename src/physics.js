@@ -105,6 +105,8 @@ export async function initPhysics(opt) {
   function setChassisPose(x, y, z, q) { if (!chassisBody) return; chassisBody.setNextKinematicTranslation({ x, y, z }); if (q) chassisBody.setNextKinematicRotation(q); }
 
   // ── Шаг + контакты ───────────────────────────────────────────────────────
+  const clinkV2 = (opt.clinkV ?? 0.6) ** 2;
+  function bodySpeed2(handle) { const c = world.getCollider(handle); const b = c && c.parent(); if (!b) return 0; const v = b.linvel(); return v.x * v.x + v.y * v.y + v.z * v.z; }
   function step() {
     world.step(eventQueue);
     for (let i = 0; i < count; i++) {
@@ -120,8 +122,8 @@ export async function initPhysics(opt) {
       } else still[i] = 0;
     }
   }
-  // cb(forceMagnitude) на каждый контакт-форс-эвент выше порога.
-  function drainContacts(cb) { eventQueue.drainContactForceEvents(e => cb(e.totalForceMagnitude())); }
+  // cb() на удар, где хотя бы одно тело реально движется (>clinkV). Покоящийся вес кучи (v=0 от деадзоны) — НЕ звенит.
+  function drainContacts(cb) { eventQueue.drainContactForceEvents(e => { if (Math.max(bodySpeed2(e.collider1()), bodySpeed2(e.collider2())) > clinkV2) cb(); }); }
 
   return {
     addCoinBody, setCoinTransform, hideCoin, enableCoin, readCoin, coinPos, isEnabled,
