@@ -84,13 +84,13 @@ export async function initPhysics(opt) {
   // передняя кромка до земли (монеты заезжают внутрь). Тело на y=0, офсеты в коллайдерах.
   function buildPlow(hx) {
     const mk = (cd) => bladeColliders.push(world.createCollider(cd.setFriction(0.8).setRestitution(0.05), bladeBody));
-    mk(RAPIER.ColliderDesc.cuboid(hx, 0.50, 0.08).setTranslation(0, 0.60, -0.05));                                  // спинка (верх ~1.1)
+    mk(RAPIER.ColliderDesc.cuboid(hx, 0.60, 0.08).setTranslation(0, 0.68, -0.05));                                  // спинка высокая (верх ~1.28, вровень с ящиком как в рефе)
     mk(RAPIER.ColliderDesc.cuboid(hx + 0.02, 0.03, 0.26).setTranslation(0, 0.40, 0.10).setRotation(xquat(-0.95)));  // дуга: верхний сегмент
     mk(RAPIER.ColliderDesc.cuboid(hx + 0.02, 0.03, 0.30).setTranslation(0, 0.13, 0.46).setRotation(xquat(-0.42)));  // дуга: нижний сегмент
     mk(RAPIER.ColliderDesc.cuboid(hx + 0.05, 0.03, 0.42).setTranslation(0, 0.03, 1.05));                            // дно (верх ~0.06)
     mk(RAPIER.ColliderDesc.cuboid(hx + 0.05, 0.02, 0.20).setTranslation(0, 0.012, 1.62).setRotation(xquat(0.12)));  // кромка до земли
     for (const s of [-1, 1]) {                                                                                       // щёки: высокая задняя + скошенная передняя
-      mk(RAPIER.ColliderDesc.cuboid(0.05, 0.45, 0.45).setTranslation(s * (hx + 0.03), 0.50, 0.18));
+      mk(RAPIER.ColliderDesc.cuboid(0.05, 0.52, 0.45).setTranslation(s * (hx + 0.03), 0.56, 0.18));
       mk(RAPIER.ColliderDesc.cuboid(0.05, 0.16, 0.60).setTranslation(s * (hx + 0.03), 0.16, 0.98));
     }
   }

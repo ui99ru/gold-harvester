@@ -12,14 +12,17 @@ function mulberry32(a) {
 }
 const _seed = TEST ? (Number(QS.get('seed')) || 1) : 0;
 const _rng = _seed ? mulberry32(_seed) : Math.random;
-export function rnd() { return _rng(); }   // = Math.random в обычном режиме, seeded в ?test
+export function rnd() { return _rng(); }   // СИМ-поток: только геймплей-значимое (respawn, копии). Seeded в ?test
+const _rngv = _seed ? mulberry32(_seed ^ 0x9e3779b9) : Math.random;
+export function rndv() { return _rngv(); }   // ВИЗУАЛ-поток: камера-шейк/пыль/искры — дёргается и в рендере (rAF), не должен сдвигать сим-поток
 
 // Все «магические числа», которые крутит цикл сравнения (реф > ТЗ: лавандовый грунт, насыщенное золото).
 export const CFG = {
   exposure: 0.92, bgColor: 0x7c6cb2, groundColor: 0x9c8fc0, fogNear: 120, fogFar: 360,
-  fov: 47, camHeight: 24, camBack: 17, lookAhead: 7, camYaw: 0.6,   // круче наклон, без горизонта; +yaw: коридор влево-вверх как в рефе
+  fov: 40.5, camHeight: 45, camBack: 24.5, lookAhead: 11, camYaw: 0.66, gateRot: 0,   // КАЛИБРОВКА по рефу (tools/_calib.py, 42 кадра): pitch 51.7°, yaw 37.8°, roll≈0, ворота ⊥ коридору
   sunInt: 1.5, hemiInt: 1.15,   // ярче, насыщеннее — «праздник», не пасмурно
   coinColor: 0xffb42e, coinMetal: 0.42, coinRough: 0.36, coinEmissive: 0xc06a00, coinEmInt: 0.27,   // золото: меньше металл/envMap → чистый оранж (не синит от пурпурной среды)
+  dozerColor: 0x1c1748, scoopColor: 0x2a5070,   // реф: тёмный индиго-корпус, стально-голубой ковш (тюн по пиксель-сэмплам f_0260)
   gateCurtain: 0x5ac8ff, gateGlow: 0x39c8ff,
   bloomThr: 0.86, bloomInten: 0.38,
   // Физика монет (Rapier) — главные регуляторы «ощущения тяжёлого металла», все скаляры → свип через ?key=.
