@@ -46,7 +46,8 @@ for (let i = 0; i < 50; i++) { const a = rnd() * 6.28, r = 70 + rnd() * 35, s = 
 /* DOZER (миниатюра по рефу: индиго-корпус, открытый ящик-кабина с гоблином, тёмные гусеницы, стально-голубой ковш) */
 const dozer = new THREE.Group();
 const chassisM = new THREE.MeshStandardMaterial({ color: CFG.dozerColor, roughness: .5, metalness: .2 });
-const dark = new THREE.MeshStandardMaterial({ color: 0x2b2347, roughness: .75 }); const tread = new THREE.MeshStandardMaterial({ color: 0x1b1530, roughness: .85 });   // гусеницы тёмно-фиолетовые (реф-сэмпл)
+const deckM = new THREE.MeshStandardMaterial({ color: 0x2c2a85, roughness: .5, metalness: .2 });   // платформа: светлый фиолетово-синий (реф; тёплый свет розовит — компенсация синью)
+const dark = new THREE.MeshStandardMaterial({ color: 0x140d30, roughness: .8 }); const tread = new THREE.MeshStandardMaterial({ color: 0x0c081e, roughness: .85 });   // гусеницы тёмно-фиолетовые (под реф-сэмпл рендера (47,38,75) с учётом нашего света)
 const steel = new THREE.MeshStandardMaterial({ color: 0xc8ccd6, roughness: .35, metalness: .6 });
 const scoopM = new THREE.MeshStandardMaterial({ color: CFG.scoopColor, roughness: .5, metalness: .3 });           // ковш: стально-голубой
 const scoopEdge = new THREE.MeshStandardMaterial({ color: 0xc9dcea, roughness: .4, metalness: .4 });              // светлая кромка
@@ -56,44 +57,45 @@ const helmetM = new THREE.MeshStandardMaterial({ color: 0xf2c01d, roughness: .5 
 function box(w, h, d, m, x, y, z, p) { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); (p || dozer).add(b); return b; }
 function cyl(r, h, m, x, y, z, ax, p) { const b = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 16), m); b.position.set(x, y, z); if (ax === 'x') b.rotation.z = Math.PI / 2; if (ax === 'z') b.rotation.x = Math.PI / 2; (p || dozer).add(b); return b; }
 const treads = [];   // блоки протектора — прокручиваются по скорости (вращение гусениц)
-const TREAD_N = 5, TREAD_SP = 0.44, TREAD_SPAN = TREAD_N * TREAD_SP, TREAD_MIN = -1.1;   // короткая база (реф: машина-обрубок)
-for (const sx of [-1, 1]) {   // гусеницы: массивные тёмно-фиолетовые, выше (реф), округлые торцы + протектор + ступица
-  box(.84, .62, 2.2, dark, sx * 1.0, .45, 0); cyl(.33, .86, dark, sx * 1.0, .45, 1.1, 'x'); cyl(.33, .86, dark, sx * 1.0, .45, -1.1, 'x');
-  cyl(.17, .9, steel, sx * 1.0, .45, 0, 'x');
-  for (let k = 0; k < TREAD_N; k++) treads.push(box(.9, .1, .13, tread, sx * 1.0, .8, TREAD_MIN + k * TREAD_SP));
+const TREAD_N = 5, TREAD_SP = 0.46, TREAD_SPAN = TREAD_N * TREAD_SP, TREAD_MIN = -1.15;   // база по реф-замерам (штрихи пользователя)
+for (const sx of [-1, 1]) {   // гусеницы: ТОНКИЕ полосы по бокам платформы (реф), внутри габарита ковша
+  box(.44, .58, 2.3, dark, sx * .7, .43, 0); cyl(.29, .46, dark, sx * .7, .43, 1.15, 'x'); cyl(.29, .46, dark, sx * .7, .43, -1.15, 'x');
+  cyl(.15, .5, steel, sx * .7, .43, 0, 'x');
+  for (let k = 0; k < TREAD_N; k++) treads.push(box(.5, .09, .32, tread, sx * .7, .75, TREAD_MIN + k * TREAD_SP));   // блоки шире, зазоры уже (реф)
 }
-box(1.7, .5, 1.5, chassisM, 0, .82, -.1); box(1.4, .36, .5, chassisM, 0, .78, .75); box(1.1, .28, .06, dark, 0, .74, 1.0);     // низкая палуба + короткий капот + решётка
-cyl(.13, .16, steel, -.4, .8, 1.02, 'z'); cyl(.13, .16, steel, .4, .8, 1.02, 'z');                                             // фары
-// Открытый ящик-кабина (деревянный короб) — доминанта по рефу: сидит почти на гусеницах, сразу за капотом
+box(1.3, .5, 1.5, deckM, 0, .82, -.1); box(1.1, .36, .5, deckM, 0, .78, .75); box(.9, .28, .06, dark, 0, .74, 1.0);            // светлая платформа + короткий капот + решётка
+cyl(.13, .16, steel, -.32, .8, 1.02, 'z'); cyl(.13, .16, steel, .32, .8, 1.02, 'z');                                           // фары
+// Открытый ящик-кабина (деревянный короб) — уже, вытянут к ковшу по платформе, толстые стенки (реф)
 {
-  const bx = 0, by = 1.35, bz = -.3, W = 1.3, D = 1.1, H = .62, T = .09;
+  const bx = 0, by = 1.5, bz = 0, W = 1.0, D = 1.7, H = .6, T = .16;
   box(W, T, D, woodM, bx, by - H / 2, bz);                                                                                     // дно
   box(W, H, T, woodM, bx, by, bz - D / 2 + T / 2); box(W, H, T, woodM, bx, by, bz + D / 2 - T / 2);                            // перед/зад
   box(T, H, D, woodM, bx - W / 2 + T / 2, by, bz); box(T, H, D, woodM, bx + W / 2 - T / 2, by, bz);                            // бока
 }
-// Гоблин-водитель: приземистый, по пояс из ящика — зелёный, широкая жёлтая каска с козырьком
-box(.5, .34, .4, skinM, 0, 1.55, -.3);                                                                                         // торс (широкий)
-box(.42, .26, .38, skinM, 0, 1.82, -.3);                                                                                       // голова (плоская)
-box(.52, .14, .46, helmetM, 0, 1.98, -.3); box(.52, .06, .2, helmetM, 0, 1.92, -.04);                                          // каска широкая + козырёк
-box(.12, .24, .12, skinM, -.29, 1.58, -.12); box(.12, .24, .12, skinM, .29, 1.58, -.12);                                       // руки к рычагам
-cyl(.07, .3, dark, .58, 1.35, .35, 'y'); cyl(.1, .08, dark, .58, 1.52, .35, 'y');                                              // короткий выхлоп
+// Гоблин-водитель: по пояс из ящика — зелёный, жёлтая каска с козырьком (верх каски ~2.35)
+box(.4, .32, .34, skinM, 0, 1.74, -.3);                                                                                        // торс
+box(.34, .24, .3, skinM, 0, 2.0, -.3);                                                                                         // голова
+box(.42, .13, .38, helmetM, 0, 2.18, -.3); box(.42, .05, .17, helmetM, 0, 2.13, -.09);                                         // каска + козырёк
+box(.1, .22, .1, skinM, -.23, 1.76, -.14); box(.1, .22, .1, skinM, .23, 1.76, -.14);                                           // руки к рычагам
+box(.46, .1, .42, dark, 0, 1.5, -.32); box(.46, .34, .1, dark, 0, 1.7, -.52);                                                  // кресло: подушка + спинка
+for (const s of [-1, 1]) { const lv = cyl(.025, .26, steel, s * .18, 1.78, .08, 'y'); lv.rotation.x = 0.5; cyl(.05, .05, dark, s * .18, 1.89, .14, 'y'); }   // рычаги с набалдашниками
 // Ковш-корыто (C-профиль): дно дугой загибается в высокую вогнутую спинку, сплошные щёки, кромка до земли.
 const blade = new THREE.Group(); blade.position.set(0, 0, 1.15); dozer.add(blade);   // вплотную к корпусу (реф: машина-обрубок)
 {
-  box(2.6, 1.2, .16, scoopM, 0, .68, -.05, blade);                                                       // спинка ВЫСОКАЯ — вровень с верхом ящика (реф)
-  cyl(.09, 2.6, scoopEdge, 0, 1.3, -.03, 'x', blade);                                                    // верхняя труба-кромка (светлая)
-  const emb = new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, .05, 20), helmetM); emb.rotation.x = Math.PI / 2; emb.position.set(0, .72, -.16); blade.add(emb);   // жёлтый кружок-эмблема на спинке (реф)
-  const s2 = box(2.6, .06, .52, scoopM, 0, .40, .10, blade); s2.rotation.x = -0.95;                      // дуга: верхний сегмент
-  const s1 = box(2.6, .06, .60, scoopM, 0, .13, .46, blade); s1.rotation.x = -0.42;                      // дуга: нижний сегмент
-  box(2.7, .06, .84, scoopM, 0, .03, 1.05, blade);                                                       // дно
-  const lip = box(2.7, .05, .42, steel, 0, .035, 1.62, blade); lip.rotation.x = 0.12;                    // стальная кромка
+  box(2.0, 1.2, .16, scoopM, 0, .68, -.05, blade);                                                       // спинка ВЫСОКАЯ — ширина по реф-замерам
+  cyl(.09, 2.0, scoopEdge, 0, 1.3, -.03, 'x', blade);                                                    // верхняя труба-кромка (светлая)
+  const emb = new THREE.Mesh(new THREE.CylinderGeometry(.27, .27, .05, 20), helmetM); emb.rotation.x = Math.PI / 2; emb.position.set(0, .72, -.16); blade.add(emb);   // жёлтый кружок-эмблема на спинке (реф)
+  const s2 = box(2.0, .06, .52, scoopM, 0, .40, .10, blade); s2.rotation.x = -0.95;                      // дуга: верхний сегмент
+  const s1 = box(2.0, .06, .60, scoopM, 0, .13, .46, blade); s1.rotation.x = -0.42;                      // дуга: нижний сегмент
+  box(2.1, .06, .84, scoopM, 0, .03, 1.05, blade);                                                       // дно
+  const lip = box(2.1, .05, .42, steel, 0, .035, 1.62, blade); lip.rotation.x = 0.12;                    // стальная кромка
   for (const s of [-1, 1]) {                                                                             // щёки: высокая задняя + скошенная передняя
-    box(.1, 1.05, .9, scoopM, s * 1.32, .56, .18, blade);
-    const fc = box(.1, .32, 1.0, scoopM, s * 1.32, .22, .92, blade); fc.rotation.x = -0.22;
+    box(.1, 1.05, .9, scoopM, s * 1.02, .56, .18, blade);
+    const fc = box(.1, .32, 1.0, scoopM, s * 1.02, .22, .92, blade); fc.rotation.x = -0.22;
   }
 }
-box(.2, .16, .8, chassisM, -.95, .55, .65); box(.2, .16, .8, chassisM, .95, .55, .65); scene.add(dozer);                      // рычаги (короче)
-const shadow = new THREE.Mesh(new THREE.CircleGeometry(2.2, 24), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .25 })); shadow.rotation.x = -Math.PI / 2; shadow.position.y = .04; scene.add(shadow);
+box(.18, .16, .8, chassisM, -.72, .55, .65); box(.18, .16, .8, chassisM, .72, .55, .65); scene.add(dozer);                    // рычаги (под узкий габарит)
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(1.7, 24), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .25 })); shadow.rotation.x = -Math.PI / 2; shadow.position.y = .04; scene.add(shadow);
 
 /* DISCRETE COINS */
 const N = 700, THK = 0.085, RAD = 0.40;   // тонкие диски: ребром почти не встают; меньше тел ради 60fps
@@ -269,7 +271,7 @@ async function bootPhysics() {
   for (let i = 0; i < N; i++) phys.addCoinBody(i, 0, -999, 0);              // пул тел — создать раз
   for (let i = 0; i < N; i++) { if (i < CFG.startCoins) placeAtSource(i); else { C[i].st = 'free'; free.push(i); phys.hideCoin(i); hideM(i); } }
   phys.addBlade(bladeHX());
-  phys.addChassis([{ hx: 1.4, hy: 0.5, hz: 0.5, cy: 0.5, cz: 0.5 }, { hx: 1.3, hy: 1.1, hz: 0.85, cy: 1.1, cz: -0.35 }]);   // фронт-низ (стык до ковша) + ящик-высокий (монеты не на корпусе); под короткую базу
+  phys.addChassis([{ hx: 1.0, hy: 0.5, hz: 0.5, cy: 0.5, cz: 0.5 }, { hx: 0.85, hy: 1.2, hz: 0.9, cy: 1.2, cz: 0 }]);   // фронт-низ (стык до ковша) + короб-высокий (монеты не на корпусе); под вытянутый короб
   phys.addWall(-CFG.laneHalf, 0.6, 31, 0.2, 0.6, 27); phys.addWall(CFG.laneHalf, 0.6, 31, 0.2, 0.6, 27);   // коридор z∈[4,58]: монеты в полосе
   phys.addWall(0, 0.6, 4, CFG.laneHalf, 0.6, 0.25);   // задняя стенка: монеты не уезжают за источник (всегда ловятся ножом)
   syncCoins(); mesh.instanceMatrix.needsUpdate = true;
@@ -327,7 +329,7 @@ function simStep(dt) {
 }
 /* ФИЗИКА: фикс-шаг 1/60 (детерминизм) + синк инстансов из тел Rapier */
 const FIXED = 1 / 60, MAX_SUB = 5; let _acc = 0;
-function bladeHX() { return 1.3 * (UP.bladeHalf / 1.6); }        // полуширина ковша; растёт апгрейдом
+function bladeHX() { return 1.0 * (UP.bladeHalf / 1.6); }        // полуширина ковша (реф-замер: 0.86×базы); растёт апгрейдом
 // Нож = вертикальная стенка ДО земли (коллайдер отвязан от наклонного визуала — плоские диски top y≈0.17,
 // иначе нож проходит НАД ними). Едет через setNextKinematic* → Rapier выводит скорость и сгребает монеты импульсом.
 const BLADE_FWD = 1.15;   // ковш впереди дозера (local z визуала; машина-обрубок)
