@@ -72,7 +72,7 @@ function clink() {
   const ng = AC.createGain(); ng.gain.value = amp * 0.5; ns.connect(bp); bp.connect(ng); ng.connect(master); ns.start(t);
 }
 export function chime(kind) {
-  if (!AC || muted) return; const t = AC.currentTime; const notes = kind === 'gate' ? [660, 990, 1320] : [523, 659, 784, 1047];
+  if (!AC || muted) return; const t = AC.currentTime; const notes = kind === 'gate' ? [660, 990, 1320] : kind === 'trash' ? [294, 220, 147] : [523, 659, 784, 1047];   // trash: нисходящий минор — «потеря»
   notes.forEach((f, i) => {
     const o = AC.createOscillator(); o.type = 'triangle'; o.frequency.value = f; const g = AC.createGain(); const st = t + i * 0.05;
     g.gain.setValueAtTime(0, st); g.gain.linearRampToValueAtTime(0.26, st + 0.01); g.gain.exponentialRampToValueAtTime(0.0004, st + 0.32); o.connect(g); g.connect(master); o.start(st); o.stop(st + 0.36);

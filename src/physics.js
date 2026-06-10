@@ -14,6 +14,7 @@ export async function initPhysics(opt) {
   const maxv = opt.maxv ?? 0, maxv2 = maxv * maxv;   // потолок скорости монеты (тяжёлый диск не «улетает мячом»); 0=выкл
   // Принудительный сон почти-неподвижных: гасит «вечную качку» монеты на ребре (солвер-джиттер не даёт уснуть штатно).
   const calmV2 = (opt.calmV ?? 0.25) ** 2, calmW2 = (opt.calmW ?? 0.6) ** 2, calmFrames = opt.calmFrames ?? 22, calmVy = opt.calmVy ?? 0.4, calmFlat = opt.calmFlat ?? 0.45, flattenK = opt.flattenK ?? 8;
+  const calmFlatG = opt.calmFlatG ?? calmFlat, calmGY = opt.calmGroundY ?? 0.6;   // нижний слой (без опоры кучи): порог «плашмя» жёстче — наклонную у земли валим, в куче разрешаем спать
 
   await RAPIER.init();   // async WASM (base64 инлайн в -compat → без сети под file://)
 
@@ -45,13 +46,13 @@ export async function initPhysics(opt) {
     coinBodies[i] = b;
     return b;
   }
-  // recycle (респаун в источник / ссып в пад): телепорт + обнулить скорости + разбудить.
-  function setCoinTransform(i, x, y, z, q) {
+  // recycle (респаун в источник / ссып в пад / волна из ворот): телепорт + скорости (по умолч. ноль) + разбудить.
+  function setCoinTransform(i, x, y, z, q, vel, ang) {
     const b = coinBodies[i]; if (!b) return;
     b.setTranslation({ x, y, z }, true);
     if (q) b.setRotation(q, true);
-    b.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    b.setLinvel(vel || { x: 0, y: 0, z: 0 }, true);
+    b.setAngvel(ang || { x: 0, y: 0, z: 0 }, true);
     b.wakeUp();
   }
   function hideCoin(i) {   // пул: убрать из симуляции + припарковать вне поля
@@ -69,6 +70,7 @@ export async function initPhysics(opt) {
     return true;
   }
   function coinPos(i) { const b = coinBodies[i]; return b ? b.translation() : null; }
+  function coinVel(i) { const b = coinBodies[i]; return b ? b.linvel() : null; }
   function isEnabled(i) { const b = coinBodies[i]; return b ? b.isEnabled() : false; }
 
   // Стенка-коллайдер (fixed): коридор удерживает монеты в полосе ворот (дозер кинематический → проходит сквозь).
@@ -125,7 +127,8 @@ export async function initPhysics(opt) {
       const r = b.rotation();   // ось монеты R·(0,1,0): плашмя ≈ |upy|→1, на ребре ≈ upy→0
       const upx = 2 * (r.x * r.y - r.w * r.z), upy = 1 - 2 * (r.x * r.x + r.z * r.z), upz = 2 * (r.y * r.z + r.w * r.x);
       if (s < calmV2 && sw < calmW2 && Math.abs(v.y) < calmVy) {
-        if (Math.abs(upy) > calmFlat) {            // лежит плашмя → заморозить (деадзона + сон)
+        const flatThr = b.translation().y < calmGY ? calmFlatG : calmFlat;   // у земли «на ребре под углом» не бывает — валим
+        if (Math.abs(upy) > flatThr) {             // лежит плашмя → заморозить (деадзона + сон)
           b.setLinvel(_ZERO, false); b.setAngvel(_ZERO, false);
           if (++still[i] >= calmFrames) { b.sleep(); still[i] = 0; }
         } else {                                   // почти стоит на ребре → активный «завал»: угл.скорость к мировому верху (up × Y)
@@ -138,7 +141,7 @@ export async function initPhysics(opt) {
   function drainContacts(cb) { eventQueue.drainContactForceEvents(e => { if (Math.max(bodySpeed2(e.collider1()), bodySpeed2(e.collider2())) > clinkV2) cb(); }); }
 
   return {
-    addCoinBody, setCoinTransform, hideCoin, enableCoin, readCoin, coinPos, isEnabled,
+    addCoinBody, setCoinTransform, hideCoin, enableCoin, readCoin, coinPos, coinVel, isEnabled,
     addWall, addBlade, rebuildBladeCollider, addChassis, setBladePose, setChassisPose,
     step, drainContacts,
     world, coinBodies, RAPIER,
