@@ -22,7 +22,7 @@ export const CFG = {
   fov: 43.6, camHeight: 38.1, camBack: 20, lookAhead: 11, camYaw: 0.862, gateRot: 0,   // КАМЕРА ПО ОСЯМ ПОЛЬЗОВАТЕЛЯ (f_0620): yaw 49.4°, pitch 54.5°, f 1600px; фит rms 0.65°, вертикали сходятся 1.6°; pitch здесь 50.9° = 54.5 − поправка центра видео (pp 540 vs 640)
   sunInt: 1.5, hemiInt: 1.15,   // ярче, насыщеннее — «праздник», не пасмурно
   coinColor: 0xffb42e, coinMetal: 0.42, coinRough: 0.36, coinEmissive: 0xc06a00, coinEmInt: 0.27,   // золото: меньше металл/envMap → чистый оранж (не синит от пурпурной среды)
-  dozerColor: 0x1c1748, scoopColor: 0x2a5070,   // реф: тёмный индиго-корпус, стально-голубой ковш (тюн по пиксель-сэмплам f_0260)
+  dozerColor: 0x1c1748, scoopColor: 0x33647f,   // реф: тёмный индиго-корпус, стально-голубой ковш ярче (тюн по пиксель-сэмплам f_0260)
   gateCurtain: 0x5ac8ff, gateGlow: 0x39c8ff,
   bloomThr: 0.86, bloomInten: 0.38,
   // Физика монет (Rapier) — главные регуляторы «ощущения тяжёлого металла», все скаляры → свип через ?key=.
