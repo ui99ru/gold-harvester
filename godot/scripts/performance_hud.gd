@@ -4,6 +4,7 @@ extends CanvasLayer
 
 var spawn_50_cb := Callable()
 var pool_stats_cb := Callable()  # -> Vector2i(active, free)
+var toggles: Array = []          # [[название, старт, Callable(bool)], ...]
 
 var _label: Label
 var _frame_accum := 0.0
@@ -17,6 +18,17 @@ func _ready() -> void:
 	_label.add_theme_font_size_override("font_size", 16)
 	_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.92))
 	add_child(_label)
+
+	var box := VBoxContainer.new()
+	box.position = Vector2(24, 210)
+	add_child(box)
+	for t in toggles:
+		var cb := CheckButton.new()
+		cb.text = t[0]
+		cb.button_pressed = t[1]
+		cb.add_theme_font_size_override("font_size", 18)
+		cb.toggled.connect(t[2])
+		box.add_child(cb)
 
 	var btn := Button.new()
 	btn.text = "+50 монет"

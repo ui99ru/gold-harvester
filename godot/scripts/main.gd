@@ -26,6 +26,7 @@ const POOL_SIZE := 250
 var tray: Node3D
 var coins_root: Node3D
 var camera: Camera3D
+var sun: DirectionalLight3D
 var score := 0
 
 var _pool: Array[RigidBody3D] = []
@@ -72,7 +73,7 @@ func _build_environment() -> void:
 	we.environment = env
 	add_child(we)
 
-	var sun := DirectionalLight3D.new()
+	sun = DirectionalLight3D.new()
 	sun.light_color = Color("fff4de")
 	sun.light_energy = 1.4
 	sun.shadow_enabled = true
@@ -163,6 +164,19 @@ func _build_hud() -> void:
 	hud.spawn_50_cb = _spawn_stress_batch
 	hud.pool_stats_cb = func() -> Vector2i:
 		return Vector2i(active_coins(), _pool.size())
+	# Тумблеры тюнинга (бриф §7): A/B на устройстве без пересборки
+	hud.toggles = [
+		["Тени", true, func(on: bool) -> void:
+			sun.shadow_enabled = on],
+		["Тики 50", false, func(on: bool) -> void:
+			Engine.physics_ticks_per_second = 50 if on else 60],
+		["MSAA 2x", true, func(on: bool) -> void:
+			get_viewport().msaa_3d = Viewport.MSAA_2X if on else Viewport.MSAA_DISABLED],
+		["Звон", true, func(on: bool) -> void:
+			for coin in coins_root.get_children():
+				coin.contact_monitor = on
+				coin.clink_cb = _on_coin_clink if on else Callable()],
+	]
 	add_child(hud)
 
 

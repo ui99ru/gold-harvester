@@ -12,11 +12,11 @@ coin pusher с физикой монет, перенесённой из Three.js
 редактора Godot.
 
 | Скрипт | Роль |
-|---|---|
+| --- | --- |
 | `main.gd` | сцена, лоток, пул 250 монет, тап-спавн, зона сбора, смоук-тесты |
 | `coin.gd` | RigidBody3D: r=0.40, h=0.085, friction 0.95, damp 0.8/0.9, клэмп 12 м/с |
 | `pusher.gd` | AnimatableBody3D, синусоида (период 2.5 с, амплитуда 1.8) |
-| `performance_hud.gd` | FPS, frame/physics ms, активные тела, пул, кнопка «+50» |
+| `performance_hud.gd` | FPS, frame/physics ms, активные тела, пул, кнопка «+50», тумблеры тюнинга |
 
 Физика: Jolt, gravity 30 (3×), 60 тиков/с, velocity_steps 8.
 Над толкателем — статический «капот»-скребок: монеты с его крыши ссыпаются на
@@ -52,6 +52,7 @@ $GODOT = "C:\Tools\Godot-4.4.1\Godot_v4.4.1-stable_win64_console.exe"
 ## Локальная сборка APK
 
 Один раз:
+
 1. Godot 4.4.1 + export templates (распаковать .tpz в
    `%APPDATA%\Godot\export_templates\4.4.1.stable\`).
 2. JDK 17 (Temurin), Android SDK: `sdkmanager "platform-tools"
@@ -86,9 +87,13 @@ Release-подпись (база на будущее): keystore в base64 → Se
 ## Замеры
 
 | Сценарий | Платформа | Результат |
-|---|---|---|
+| --- | --- | --- |
 | smoke-stress: 250 монет, 10 с | Desktop (Ryzen/RTX 3060) | avg physics **1.75 мс** |
-| 250 монет на устройстве | Snapdragon 7-й серии | TODO: HUD на телефоне |
+| 242 монеты, куча у обрыва | Телефон пользователя | FPS 39, frame 27.0 мс, physics 13.3 мс |
 
-Тюнинг по результатам (бриф §7, по одному изменению): тени off → MSAA off →
-тики 60→50 → sleep-пороги Jolt → CCD точечно при туннелировании.
+Тюнинг (бриф §7) — тумблеры в HUD, по одному, замер на устройстве:
+тени / тики 60→50 / MSAA 2x / звон+контакты (contact_monitor).
+`active bodies 0` на Jolt — монитор не заполняется, не верить.
+Если после отключения теней рендер всё ещё дорог — следующий кандидат:
+MultiMesh вместо 250 MeshInstance3D (1 draw call, ручная синхронизация
+трансформов из физики).
