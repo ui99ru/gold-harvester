@@ -1,0 +1,147 @@
+[gd_resource type="Resource" script_class="LevelDef" load_steps=18 format=3]
+
+[ext_resource type="Script" path="res://scripts/level_def.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/entity_def.gd" id="2"]
+
+[sub_resource type="Resource" id="w01"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(-2.8, 0.6, 15.75)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 11.75)
+}
+
+[sub_resource type="Resource" id="w02"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(2.8, 0.6, 15.75)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 11.75)
+}
+
+[sub_resource type="Resource" id="w03"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(-2.8, 0.6, 45.25)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 12.75)
+}
+
+[sub_resource type="Resource" id="w04"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(2.8, 0.6, 45.25)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 12.75)
+}
+
+[sub_resource type="Resource" id="w05"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(-7.15, 0.6, 27.3)
+rotation_y = 0.0
+params = {
+"half": Vector3(4.35, 0.6, 0.2)
+}
+
+[sub_resource type="Resource" id="w06"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(7.15, 0.6, 27.3)
+rotation_y = 0.0
+params = {
+"half": Vector3(4.35, 0.6, 0.2)
+}
+
+[sub_resource type="Resource" id="w07"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(-7.15, 0.6, 32.7)
+rotation_y = 0.0
+params = {
+"half": Vector3(4.35, 0.6, 0.2)
+}
+
+[sub_resource type="Resource" id="w08"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(7.15, 0.6, 32.7)
+rotation_y = 0.0
+params = {
+"half": Vector3(4.35, 0.6, 0.2)
+}
+
+[sub_resource type="Resource" id="w09"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(-11.65, 0.6, 30)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 2.9)
+}
+
+[sub_resource type="Resource" id="w10"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(11.65, 0.6, 30)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 2.9)
+}
+
+[sub_resource type="Resource" id="w11"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(0, 0.6, 4)
+rotation_y = 0.0
+params = {
+"half": Vector3(2.8, 0.6, 0.25)
+}
+
+[sub_resource type="Resource" id="gate1"]
+script = ExtResource("2")
+type = "gate"
+position = Vector3(0, 0, 20)
+rotation_y = 0.0
+params = {
+"cost": 10,
+"mult": 10
+}
+
+[sub_resource type="Resource" id="gate2"]
+script = ExtResource("2")
+type = "gate"
+position = Vector3(0, 0, 40)
+rotation_y = 0.0
+params = {
+"cost": 600,
+"mult": 100
+}
+
+[sub_resource type="Resource" id="pad_knife"]
+script = ExtResource("2")
+type = "pad_knife"
+position = Vector3(-9, 0, 30)
+rotation_y = -1.5707963267949
+params = {
+"cost": 120
+}
+
+[sub_resource type="Resource" id="trash"]
+script = ExtResource("2")
+type = "trash"
+position = Vector3(9, 0, 30)
+rotation_y = 1.5707963267949
+params = {}
+
+[resource]
+script = ExtResource("1")
+source_pos = Vector3(0, 0, 9)
+source_radius = 0.8
+start_coins = 5
+dozer_start = Vector3(0, 0, 0)
+entities = Array[ExtResource("2")]([SubResource("w01"), SubResource("w02"), SubResource("w03"), SubResource("w04"), SubResource("w05"), SubResource("w06"), SubResource("w07"), SubResource("w08"), SubResource("w09"), SubResource("w10"), SubResource("w11"), SubResource("gate1"), SubResource("gate2"), SubResource("pad_knife"), SubResource("trash")])

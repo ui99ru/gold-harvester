@@ -3,11 +3,28 @@ extends RigidBody3D
 ## Геометрия и материал — общие static-ресурсы: один меш и один материал на все
 ## монеты (батчинг), один PhysicsMaterial.
 
-const RADIUS := 0.40
+const RADIUS := 0.40                       # = CFG.COIN_RAD (дублируем: coin.tscn самодостаточен)
 const THICKNESS := 0.085
 const DENSITY := 9.0                       # rapier coinDensity
 const MAX_SPEED := 12.0                    # rapier coinMaxV
 const CLINK_IMPULSE := 0.7                 # порог импульса контакта для звона, Н·с
+const CLINK_V2 := 9.0                      # clinkV=3.0² — скольжение/оседание молчит (web drainContacts)
+
+# Активный «завал» монеты с ребра (порт physics.js:129-136, пороги src/config.js:31-32)
+const CALM_V2 := 1.44                      # calmV 1.2²
+const CALM_W2 := 36.0                      # calmW 6.0²
+const CALM_VY := 0.4
+const CALM_FLAT := 0.45
+const CALM_FLAT_G := 0.75
+const CALM_GROUND_Y := 0.6
+const FLATTEN_K := 8.0
+
+## Принудительный сон деадзоны (web calmFrames) НЕ портирован: у Jolt свой sleep,
+## в лотке кучи засыпают штатно. Завал — наблюдаемое поведение, оставлен.
+@export var calm_flatten := true
+
+var idx := -1                              # стабильный индекс в пуле (side-массивы ворот)
+var worth := 1                             # ценность; множится воротами
 
 # Вызывается main'ом: (global_pos: Vector3, strength: float 0..1)
 var clink_cb := Callable()
@@ -66,12 +83,25 @@ func _ready() -> void:
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var v := state.linear_velocity
-	if v.length_squared() > MAX_SPEED * MAX_SPEED:
+	var s := v.length_squared()
+	if s > MAX_SPEED * MAX_SPEED:
 		state.linear_velocity = v.normalized() * MAX_SPEED
+		v = state.linear_velocity
+		s = MAX_SPEED * MAX_SPEED
 
-	if clink_cb.is_valid():
+	# Звон: удар с импульсом выше порога И тело реально движется (web clinkV)
+	if clink_cb.is_valid() and s > CLINK_V2:
 		for i in state.get_contact_count():
 			var imp := state.get_contact_impulse(i).length()
 			if imp > CLINK_IMPULSE:
 				clink_cb.call(global_position, clampf(imp / (CLINK_IMPULSE * 6.0), 0.15, 1.0))
 				break
+
+	# Активный «завал» с ребра: почти неподвижная монета на ребре получает
+	# угловую скорость к плашмя (up × Y). Web: physics.js:134-135.
+	if calm_flatten and s < CALM_V2 and absf(v.y) < CALM_VY \
+			and state.angular_velocity.length_squared() < CALM_W2:
+		var up := state.transform.basis.y                # ось монеты R·(0,1,0)
+		var flat_thr := CALM_FLAT_G if state.transform.origin.y < CALM_GROUND_Y else CALM_FLAT
+		if absf(up.y) < flat_thr:
+			state.angular_velocity = Vector3(-FLATTEN_K * up.z, 0, FLATTEN_K * up.x)

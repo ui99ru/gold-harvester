@@ -1,6 +1,7 @@
 extends Node3D
-## Игровой цикл: построение сцены кодом, спавн монет, смоук-тесты.
-## Сцены (.tscn) минимальны — вся геометрия создаётся здесь (см. бриф §2).
+## Лоток-полигон (тест-сцена физики, НЕ игра): толкатель, обрыв, смоук-тесты.
+## Вся геометрия создаётся кодом; пул/звон/скриншоты — общие модули
+## (coin_pool.gd, clink_audio.gd, shot_tool.gd), их же использует игра.
 
 # --- Геометрия лотка (монета r=0.40, см. coin.gd) ---
 const TRAY_TILT_DEG := 6.0   # наклон к обрыву (+z вниз)
@@ -10,35 +11,22 @@ const WALL_H := 1.2
 const WALL_T := 0.4
 const FLOOR_T := 0.5
 
-# Палитра web-версии (src/main.js)
-const BG_COLOR := Color("7c6cb2")
-const GROUND_COLOR := Color("9c8fc0")
 const TRAY_COLOR := Color("4a4466")
 
-const COIN_SCENE := preload("res://scenes/coin.tscn")
 const PUSHER_SCENE := preload("res://scenes/pusher.tscn")
 const SPAWN_HEIGHT := 3.0    # глобальная высота плоскости спавна по тапу
-const AUDIO_POOL_SIZE := 8
-const CLINK_MIN_INTERVAL_MS := 50
 const KILL_Y := -6.0         # ниже — монета потеряна, возврат без счёта
 const POOL_SIZE := 250
 
 var tray: Node3D
-var coins_root: Node3D
+var pool: CoinPool
+var clinks: ClinkAudio
+var shot: ShotTool
 var camera: Camera3D
 var sun: DirectionalLight3D
 var score := 0
 
-var _pool: Array[RigidBody3D] = []
 var _score_label: Label
-
-var _audio_players: Array[AudioStreamPlayer3D] = []
-var _clink_streams: Array[AudioStream] = []
-var _audio_idx := 0
-var _last_clink_ms := 0
-
-var _shot_path := ""
-var _shot_frames_left := 0
 var _smoke_mode := ""
 var _smoke_ticks := 0
 var _phys_time_accum := 0.0
@@ -50,13 +38,20 @@ func _ready() -> void:
 	_build_pusher()
 	_build_collect_zone()
 	_build_camera()
-	_build_audio()
 	_build_score_ui()
 	_build_hud()
-	coins_root = Node3D.new()
-	coins_root.name = "Coins"
-	add_child(coins_root)
-	_init_pool()
+	clinks = ClinkAudio.new()
+	add_child(clinks)
+	shot = ShotTool.new()
+	shot.info_cb = func() -> String:
+		return "score=%d active=%d pool=%d | shadows=%s ticks=%d msaa=%d" % [
+			score, pool.active_count(), pool.free_count(),
+			sun.shadow_enabled, Engine.physics_ticks_per_second, get_viewport().msaa_3d]
+	add_child(shot)
+	pool = CoinPool.new()
+	pool.name = "Coins"
+	add_child(pool)
+	pool.setup(POOL_SIZE, _on_coin_clink)
 	_parse_user_args()
 
 
@@ -65,7 +60,7 @@ func _ready() -> void:
 func _build_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = BG_COLOR
+	env.background_color = CFG.BG_COLOR
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.85, 0.85, 1.0)
 	env.ambient_light_energy = 0.35
@@ -86,7 +81,7 @@ func _build_environment() -> void:
 	var gmesh := PlaneMesh.new()
 	gmesh.size = Vector2(120.0, 120.0)
 	ground.mesh = gmesh
-	ground.material_override = _flat_material(GROUND_COLOR)
+	ground.material_override = _flat_material(CFG.GROUND_COLOR)
 	ground.position = Vector3(0, -4.0, 0)
 	add_child(ground)
 
@@ -123,7 +118,7 @@ func _build_tray() -> void:
 	var hood_z_to := -1.2
 	_add_box(body, Vector3(TRAY_W, 0.55, hood_z_to - hood_z_from),
 		Vector3(0, 1.05 + 0.275, (hood_z_from + hood_z_to) / 2.0), mat)
-	# Передний край (z = +half_l) открыт — обрыв, зона сбора ниже (этап 3)
+	# Передний край (z = +half_l) открыт — обрыв, зона сбора ниже
 
 
 func _build_pusher() -> void:
@@ -163,7 +158,7 @@ func _build_hud() -> void:
 	var hud := preload("res://scripts/performance_hud.gd").new()
 	hud.spawn_50_cb = _spawn_stress_batch
 	hud.pool_stats_cb = func() -> Vector2i:
-		return Vector2i(active_coins(), _pool.size())
+		return Vector2i(pool.active_count(), pool.free_count())
 	# Тумблеры тюнинга (бриф §7): A/B на устройстве без пересборки
 	hud.toggles = [
 		["Тени", true, func(on: bool) -> void:
@@ -173,16 +168,16 @@ func _build_hud() -> void:
 		["MSAA 2x", true, func(on: bool) -> void:
 			get_viewport().msaa_3d = Viewport.MSAA_2X if on else Viewport.MSAA_DISABLED],
 		["Звон", true, func(on: bool) -> void:
-			for coin in coins_root.get_children():
-				coin.contact_monitor = on
-				coin.clink_cb = _on_coin_clink if on else Callable()],
+			clinks.enabled = on
+			for coin in pool.get_children():
+				coin.contact_monitor = on],
 	]
 	add_child(hud)
 
 
 func _spawn_stress_batch() -> void:
 	for i in 50:
-		spawn_coin(Vector3(randf_range(-3.5, 3.5),
+		pool.spawn(Vector3(randf_range(-3.5, 3.5),
 			2.0 + 0.3 * (i % 5), randf_range(-1.0, 4.0)))
 
 
@@ -192,12 +187,7 @@ func _on_coin_collected(body: Node3D) -> void:
 		body.set_meta("dead", true)
 		score += 1
 		_score_label.text = str(score)
-		_finish_release.call_deferred(body)
-
-
-func _finish_release(coin: RigidBody3D) -> void:
-	_deactivate(coin)
-	_pool.append(coin)
+		pool.release.call_deferred(body)
 
 
 func _build_camera() -> void:
@@ -207,59 +197,6 @@ func _build_camera() -> void:
 	camera.position = Vector3(0, 13.0, 12.0)
 	camera.look_at_from_position(camera.position, Vector3(0, 0, 0.5), Vector3.UP)
 	add_child(camera)
-
-
-func _build_audio() -> void:
-	for i in 4:
-		_clink_streams.append(load("res://assets/audio/clink_%d.wav" % (i + 1)))
-	for i in AUDIO_POOL_SIZE:
-		var p := AudioStreamPlayer3D.new()
-		p.max_polyphony = 1
-		add_child(p)
-		_audio_players.append(p)
-
-
-# --- Пул монет (бриф §4: предсоздать, неактивные выключены) ---
-
-func _init_pool() -> void:
-	for i in POOL_SIZE:
-		var coin: RigidBody3D = COIN_SCENE.instantiate()
-		coin.clink_cb = _on_coin_clink
-		coins_root.add_child(coin)
-		_deactivate(coin)
-		_pool.append(coin)
-
-
-func _deactivate(coin: RigidBody3D) -> void:
-	coin.set_meta("dead", true)
-	coin.freeze = true
-	coin.visible = false
-	# Слои обязательно в 0: замороженное тело — статик и иначе коллайдит
-	coin.collision_layer = 0
-	coin.collision_mask = 0
-	coin.position = Vector3(0, -100, 0)
-
-
-func spawn_coin(pos: Vector3, random_tilt := true) -> RigidBody3D:
-	if _pool.is_empty():
-		return null
-	var coin: RigidBody3D = _pool.pop_back()
-	coin.set_meta("dead", false)
-	coin.transform = Transform3D(Basis(), pos)
-	if random_tilt:
-		coin.rotation = Vector3(
-			randf_range(-0.3, 0.3), randf_range(0, TAU), randf_range(-0.3, 0.3))
-	coin.collision_layer = 1
-	coin.collision_mask = 1
-	coin.visible = true
-	coin.freeze = false
-	coin.linear_velocity = Vector3.ZERO
-	coin.angular_velocity = Vector3.ZERO
-	return coin
-
-
-func active_coins() -> int:
-	return POOL_SIZE - _pool.size()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -277,21 +214,11 @@ func _spawn_at_tap(screen_pos: Vector2) -> void:
 	hit.x = clampf(hit.x, -TRAY_W / 2.0 + 0.5, TRAY_W / 2.0 - 0.5)
 	# Не спавнить в щель за толкателем — там монеты зажимает между ним и стенкой
 	hit.z = clampf(hit.z, -1.0, TRAY_L / 2.0 - 0.2)
-	spawn_coin(hit)
+	pool.spawn(hit)
 
 
 func _on_coin_clink(pos: Vector3, strength: float) -> void:
-	var now := Time.get_ticks_msec()
-	if now - _last_clink_ms < CLINK_MIN_INTERVAL_MS:
-		return
-	_last_clink_ms = now
-	var p := _audio_players[_audio_idx]
-	_audio_idx = (_audio_idx + 1) % AUDIO_POOL_SIZE
-	p.stream = _clink_streams[randi() % _clink_streams.size()]
-	p.global_position = pos
-	p.pitch_scale = randf_range(0.9, 1.1)
-	p.volume_db = linear_to_db(clampf(strength, 0.15, 1.0))
-	p.play()
+	clinks.clink(pos, strength)
 
 
 # --- Утилиты ---
@@ -327,23 +254,22 @@ func _tray_phys_material() -> PhysicsMaterial:
 	return pm
 
 
-# --- Смоук-тесты и скриншоты (запуск: godot --path godot ++ --shot=out/x.png) ---
-# Headless: godot --headless --path godot ++ --smoke-stack
+# --- Смоук-тесты и скриншоты ---
+# godot --headless --path godot res://scenes/pusher_lab.tscn ++ --smoke-stack
 
 func _parse_user_args() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--shot="):
-			_shot_path = arg.trim_prefix("--shot=")
-			_shot_frames_left = maxi(_shot_frames_left, 20)  # дать кадрам отрисоваться
+			shot.request(arg.trim_prefix("--shot="))
 		elif arg.begins_with("--drop-demo"):
 			# N монет для визуальной проверки (вместе с --shot): --drop-demo=240
 			var n := 50
 			if "=" in arg:
 				n = int(arg.get_slice("=", 1))
-			_shot_frames_left = 150 if n <= 50 else 900  # большой куче дать осесть
 			for i in n:
-				spawn_coin(Vector3(randf_range(-3, 3), 1.6 + (i % 5) * 0.3,
+				pool.spawn(Vector3(randf_range(-3, 3), 1.6 + (i % 5) * 0.3,
 					randf_range(-1.0, 4.0)))
+			shot.delay(900 if n > 50 else 150)  # куче дать осесть; путь придёт из --shot
 		elif arg.begins_with("--smoke-"):
 			_smoke_mode = arg.trim_prefix("--smoke-")
 			seed(20260611)  # детерминированный прогон
@@ -357,33 +283,32 @@ func _parse_user_args() -> void:
 			var x := -3.0 + 1.5 * (col % 5)
 			var z := 1.0 + 1.5 * floorf(col / 5.0)
 			for row in 5:
-				spawn_coin(Vector3(x, 1.0 + row * 0.25, z), false)
+				pool.spawn(Vector3(x, 1.0 + row * 0.25, z), false)
 	elif _smoke_mode == "pusher":
 		# Плотный слой перед толкателем — за 30 с волна должна дойти до зоны сбора
 		for i in 120:
-			spawn_coin(Vector3(randf_range(-3.8, 3.8),
+			pool.spawn(Vector3(randf_range(-3.8, 3.8),
 				1.6 + 0.3 * (i % 4), randf_range(-1.0, 4.2)))
 	elif _smoke_mode == "stress":
 		# Весь пул на сцену (сетка 10x5x5) — базовый замер времени физики
 		for i in POOL_SIZE:
-			spawn_coin(Vector3(
+			pool.spawn(Vector3(
 				-3.6 + 0.8 * (i % 10),
 				2.0 + 0.4 * floorf(i / 50.0),
 				-0.6 + 1.1 * (floori(i / 10.0) % 5)))
 	elif _smoke_mode == "jam":
 		# Сценарий «затор»: 240 монет, толкатель должен свалить излишек за 15 с
 		for i in 240:
-			spawn_coin(Vector3(randf_range(-3, 3), 1.6 + (i % 5) * 0.3,
+			pool.spawn(Vector3(randf_range(-3, 3), 1.6 + (i % 5) * 0.3,
 				randf_range(-1.0, 4.0)))
 
 
 func _physics_process(_delta: float) -> void:
 	# Сметание потеряшек: ниже KILL_Y и мимо зоны сбора — возврат в пул без счёта
-	if Engine.get_physics_frames() % 30 == 0 and coins_root != null:
-		for coin in coins_root.get_children():
+	if Engine.get_physics_frames() % 30 == 0 and pool != null:
+		for coin in pool.get_children():
 			if not coin.freeze and coin.global_position.y < KILL_Y:
-				coin.set_meta("dead", true)
-				_finish_release(coin)
+				pool.release(coin)
 
 	if _smoke_mode == "":
 		return
@@ -405,7 +330,7 @@ func _finish_smoke_stack() -> void:
 	var total := 0
 	var asleep := 0
 	var fallen := 0
-	for coin in coins_root.get_children():
+	for coin in pool.get_children():
 		if coin.freeze:
 			continue
 		total += 1
@@ -421,57 +346,29 @@ func _finish_smoke_stack() -> void:
 
 func _finish_smoke_pusher() -> void:
 	_smoke_mode = ""
-	var ok := score > 0 and active_coins() + _pool.size() == POOL_SIZE
+	var ok := score > 0 and pool.active_count() + pool.free_count() == POOL_SIZE
 	print("SMOKE %s: score=%d remaining=%d" %
-		["OK" if ok else "FAIL", score, active_coins()])
+		["OK" if ok else "FAIL", score, pool.active_count()])
 	get_tree().quit(0 if ok else 1)
 
 
 func _finish_smoke_jam() -> void:
 	_smoke_mode = ""
-	var dups := _pool.size() - _count_unique(_pool)
-	var books_ok := score + active_coins() == 240 and _pool.size() == POOL_SIZE - active_coins()
+	var dups := pool.duplicates()
+	var books_ok := score + pool.active_count() == 240 \
+		and pool.free_count() == POOL_SIZE - pool.active_count()
 	var ok := dups == 0 and books_ok and score >= 40
 	print("SMOKE %s: score=%d active=%d pool=%d dups=%d" %
-		["OK" if ok else "FAIL", score, active_coins(), _pool.size(), dups])
+		["OK" if ok else "FAIL", score, pool.active_count(), pool.free_count(), dups])
 	get_tree().quit(0 if ok else 1)
-
-
-func _count_unique(arr: Array) -> int:
-	var seen := {}
-	for x in arr:
-		seen[x] = true
-	return seen.size()
 
 
 func _finish_smoke_stress() -> void:
 	_smoke_mode = ""
 	var avg_ms := 1000.0 * _phys_time_accum / 600.0
-	var no_leak := active_coins() + _pool.size() == POOL_SIZE
-	var ok := no_leak and active_coins() > 0
+	var no_leak := pool.active_count() + pool.free_count() == POOL_SIZE
+	var ok := no_leak and pool.active_count() > 0
 	# ~8x — измеренный прокси телефона, см. performance_hud.gd PHONE_FACTOR
 	print("SMOKE %s: avg_physics=%.2f ms (≈телефон %.1f ms) active=%d pool_free=%d score=%d" %
-		["OK" if ok else "FAIL", avg_ms, avg_ms * 8.0, active_coins(), _pool.size(), score])
+		["OK" if ok else "FAIL", avg_ms, avg_ms * 8.0, pool.active_count(), pool.free_count(), score])
 	get_tree().quit(0 if ok else 1)
-
-
-func _process(_delta: float) -> void:
-	if _shot_path != "":
-		_shot_frames_left -= 1
-		if _shot_frames_left <= 0:
-			_take_shot()
-
-
-func _take_shot() -> void:
-	var img := get_viewport().get_texture().get_image()
-	var abs_path := _shot_path
-	if abs_path.is_relative_path():
-		abs_path = ProjectSettings.globalize_path("res://").path_join(_shot_path)
-	DirAccess.make_dir_recursive_absolute(abs_path.get_base_dir())
-	var err := img.save_png(abs_path)
-	print("SHOT %s -> %s | score=%d active=%d pool=%d | shadows=%s ticks=%d msaa=%d" %
-		[("OK" if err == OK else "FAIL %d" % err), abs_path,
-		score, active_coins(), _pool.size(),
-		sun.shadow_enabled, Engine.physics_ticks_per_second, get_viewport().msaa_3d])
-	_shot_path = ""
-	get_tree().quit(0 if err == OK else 1)
