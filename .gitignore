@@ -13,6 +13,10 @@ refs/*.mp3
 refs/*.wav
 audio-loop.js
 
+# Godot (импорт-кэш и сборки)
+godot/.godot/
+godot/build/
+
 # OS / редактор
 .DS_Store
 Thumbs.db
