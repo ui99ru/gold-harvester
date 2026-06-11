@@ -4,6 +4,8 @@ extends Node3D
 ## [физика движком] → экономика → клинки → частицы. Карта — данные (levels/*.tres).
 
 const LEVEL := preload("res://levels/level_01.tres")
+const DOZER_R := 1.6
+const BLADE_R := 0.35
 
 # --- Мутабельное состояние (web: src/state.js) ---
 var up_blade_half := CFG.UP_BLADE_HALF
@@ -28,13 +30,33 @@ var level: LevelDef
 var camera: Camera3D
 var sun: DirectionalLight3D
 var shot: ShotTool
+var dozer: Dozer
+var dozer_shadow: MeshInstance3D
+
+# AABB-препятствия дозера: {x0,x1,z0,z1, post:bool}. Регистрируют сущности
+# (столбы ворот post=true, стойки падов post=false); web main.js:340-353.
+var obstacles: Array[Dictionary] = []
+# Зоны подъёма (маты падов/запертых ворот, h=0.2): {x,z,hx,hz}; web :334-338.
+var lift_zones: Array[Dictionary] = []
+
+var sim_time := 0.0
+var ground_lift := 0.0
+
+# Ввод (web ctrl: desired-курс + движение)
+var ctrl_desired := NAN
+var ctrl_moving := false
+
+var _drag_pos := Vector2.ZERO
+var _script_target := Vector3.INF   # сценарная цель (смоуки; web __sim.setTarget)
+var _smoke_mode := ""
+var _smoke_ticks := 0
+var _smoke_violations := 0
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
-# Откалиброванные значения вшиваются в _build_environment после фита.
 var _cal_sun := 1.0
 var _cal_amb := 1.0
 
-# Поза дозера (этап 3 заменит на dozer.gd; пока статичная цель камеры)
+# Поза дозера на старте (--pose= может переопределить до постройки)
 var dozer_pos := Vector3.ZERO
 
 
@@ -45,12 +67,38 @@ func _ready() -> void:
 	_build_environment()
 	_build_ground_and_rocks()
 	_build_walls()
+	_build_dozer()
 	_build_camera()
 	shot = ShotTool.new()
 	shot.info_cb = func() -> String:
-		return "bank=%d dozer=%s zoom=%.2f" % [bank, dozer_pos, cam_zoom]
+		return "bank=%d dozer=%s heading=%.2f zoom=%.2f" % [bank, dozer.position, heading, cam_zoom]
 	add_child(shot)
+	phase = "play"  # стартовый экран — этап 9
+	_setup_smoke()
 	_update_camera(0.0)
+
+
+func _build_dozer() -> void:
+	dozer = Dozer.new()
+	dozer.name = "Dozer"
+	dozer.position = dozer_pos
+	dozer.rotation.y = heading
+	add_child(dozer)
+	# Тень-диск (web main.js:109)
+	dozer_shadow = MeshInstance3D.new()
+	var disc := CylinderMesh.new()
+	disc.top_radius = 1.7
+	disc.bottom_radius = 1.7
+	disc.height = 0.01
+	disc.radial_segments = 24
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(0, 0, 0, 0.25)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dozer_shadow.mesh = disc
+	dozer_shadow.material_override = m
+	dozer_shadow.position = Vector3(dozer_pos.x, 0.04, dozer_pos.z)
+	add_child(dozer_shadow)
 
 
 # --- Аргументы харнесса ---
@@ -67,7 +115,10 @@ func _parse_user_args() -> void:
 			test_mode = true
 			seeded = true
 		elif arg.begins_with("--smoke-"):
+			_smoke_mode = arg.trim_prefix("--smoke-")
 			test_mode = true
+			rng_sim.seed = 7
+			rng_vis.seed = 7 ^ 0x9e3779b9
 		elif arg.begins_with("--cal="):
 			var c := arg.get_slice("=", 1).split(",")
 			_cal_sun = float(c[0])
@@ -253,9 +304,10 @@ func _update_camera(dt: float) -> void:
 	var la := CFG.LOOK_AHEAD * cam_zoom
 	var jx := (rndv() - 0.5) * sh if sh > 0.0 else 0.0
 	var jy := (rndv() - 0.5) * sh if sh > 0.0 else 0.0
+	var dp := dozer.position if dozer else dozer_pos
 	camera.position = Vector3(
-		dozer_pos.x + back * sa + jx, hgt + jy, dozer_pos.z - back * ca)
-	camera.look_at(Vector3(dozer_pos.x - la * sa, 0, dozer_pos.z + la * ca), Vector3.UP)
+		dp.x + back * sa + jx, hgt + jy, dp.z - back * ca)
+	camera.look_at(Vector3(dp.x - la * sa, 0, dp.z + la * ca), Vector3.UP)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -265,6 +317,167 @@ func _unhandled_input(event: InputEvent) -> void:
 			cam_zoom = clampf(cam_zoom * 1.08, CFG.CAM_ZOOM_MIN, CFG.CAM_ZOOM_MAX)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			cam_zoom = clampf(cam_zoom / 1.08, CFG.CAM_ZOOM_MIN, CFG.CAM_ZOOM_MAX)
+	# Драг по земле = руль (web pointerdown/move/up; мышь эмулирует тач)
+	elif event is InputEventScreenTouch:
+		driving = event.pressed
+		_drag_pos = event.position
+	elif event is InputEventScreenDrag and driving:
+		_drag_pos = event.position
+
+
+# --- Ввод -> ctrl (web applyLiveInput/applyScriptInput :322-331) ---
+
+func _apply_live_input() -> void:
+	ctrl_desired = NAN
+	ctrl_moving = false
+	if driving:
+		var origin := camera.project_ray_origin(_drag_pos)
+		var dir := camera.project_ray_normal(_drag_pos)
+		if absf(dir.y) > 0.0001:
+			var t := -origin.y / dir.y
+			if t > 0.0:
+				var hit := origin + dir * t
+				var dx := hit.x - dozer.position.x
+				var dz := hit.z - dozer.position.z
+				if dx * dx + dz * dz > 0.4:
+					ctrl_desired = atan2(dx, dz)
+	var kx := 0.0
+	var kz := 0.0
+	if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
+		kz += 1.0
+	if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
+		kz -= 1.0
+	if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
+		kx += 1.0  # лево-право инвертированы (под реф, web :325)
+	if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
+		kx -= 1.0
+	if kx != 0.0 or kz != 0.0:
+		ctrl_desired = atan2(kx, kz)
+		ctrl_moving = true
+	elif not is_nan(ctrl_desired):
+		ctrl_moving = true
+
+
+func _apply_script_input() -> void:
+	ctrl_desired = NAN
+	ctrl_moving = false
+	if _script_target != Vector3.INF:
+		var dx := _script_target.x - dozer.position.x
+		var dz := _script_target.z - dozer.position.z
+		if dx * dx + dz * dz > 0.25:
+			ctrl_desired = atan2(dx, dz)
+			ctrl_moving = true
+
+
+# --- Сим-шаг (web simStep :360-378, порядок сохранён) ---
+
+func _physics_process(delta: float) -> void:
+	if phase != "play":
+		return
+	if _script_target != Vector3.INF:
+		_apply_script_input()
+	else:
+		_apply_live_input()
+	sim_step(delta)
+	_smoke_tick()
+
+
+func sim_step(dt: float) -> void:
+	sim_time += dt
+	if not is_nan(ctrl_desired):
+		var d := wrapf(ctrl_desired - heading, -PI, PI)
+		heading += d * minf(1.0, dt * CFG.HEADING_LERP)
+	speed_now += ((up_move if ctrl_moving else 0.0) - speed_now) * minf(1.0, dt * CFG.SPEED_LERP)
+	dozer.position.x += sin(heading) * speed_now * dt
+	dozer.position.z += cos(heading) * speed_now * dt
+	_resolve_obstacles()
+	dozer.rotation.y = heading
+	# Высота опоры: max по центру/носу + упреждение; вверх быстро, вниз плавно
+	var sn := sin(heading)
+	var cs := cos(heading)
+	var ahead := speed_now * 0.25
+	var gy := 0.0
+	for d: float in [0.0, 1.5, 2.9 + ahead]:
+		gy = maxf(gy, ground_y_under(dozer.position.x + sn * d, dozer.position.z + cs * d))
+	ground_lift += (gy - ground_lift) * minf(1.0, dt * (25.0 if gy > ground_lift else 6.0))
+	dozer.position.y = ground_lift + sin(sim_time * 20.0) * 0.02 * minf(1.0, speed_now / 3.0)
+	dozer.anim_tracks(dt, speed_now)
+	dozer_pos = dozer.position
+	dozer_shadow.position = Vector3(dozer.position.x, 0.04, dozer.position.z)
+	# физика монет шагает движком после _physics_process; экономика — этап 5+
+
+
+func ground_y_under(x: float, z: float) -> float:
+	for zn in lift_zones:
+		if absf(x - zn.x) < zn.hx and absf(z - zn.z) < zn.hz:
+			return 0.2
+	return 0.0
+
+
+func _push_out(px: float, pz: float, r2: float, posts_only: bool) -> bool:
+	for o in obstacles:
+		if posts_only and not o.post:
+			continue
+		var cx := clampf(px, o.x0, o.x1)
+		var cz := clampf(pz, o.z0, o.z1)
+		var dx := px - cx
+		var dz := pz - cz
+		var d2 := dx * dx + dz * dz
+		if d2 > 0.000001 and d2 < r2:
+			var d := sqrt(d2)
+			var k := (sqrt(r2) - d) / d
+			dozer.position.x += dx * k
+			dozer.position.z += dz * k
+			return true
+	return false
+
+
+func _resolve_obstacles() -> void:
+	_push_out(dozer.position.x, dozer.position.z, DOZER_R * DOZER_R, false)
+	var sn := sin(heading)
+	var cs := cos(heading)
+	var bw := dozer.blade_hx() + 0.15
+	var bf := Dozer.BLADE_FWD + 1.3  # передние углы ковша (губа ~+1.26)
+	for s: float in [-1.0, 1.0]:
+		_push_out(dozer.position.x + sn * bf + cs * s * bw,
+			dozer.position.z + cs * bf - sn * s * bw, BLADE_R * BLADE_R, true)
+
+
+# --- Смоуки игровой сцены ---
+
+func _setup_smoke() -> void:
+	if _smoke_mode == "drive":
+		# Столбы как у реальных ворот (x=±4.6, AABB ±0.75). Фаза 1: таран
+		# столба — выталкивание держит (web pushout — слайд, не объезд).
+		# Фаза 2: проезд в створ до z=30.
+		for sx in [-4.6, 4.6]:
+			obstacles.append({"x0": sx - 0.75, "x1": sx + 0.75,
+				"z0": 19.25, "z1": 20.75, "post": true})
+		_script_target = Vector3(4.6, 0, 20)
+
+
+func _smoke_tick() -> void:
+	if _smoke_mode == "":
+		return
+	_smoke_ticks += 1
+	if _smoke_mode == "drive":
+		# Инвариант web: центр дозера никогда не ВНУТРИ AABB (сквозь столб
+		# не проходит). Клиренс < R транзиентно бывает и в web (двойное
+		# выталкивание корпус+ковш) — это не нарушение.
+		for o in obstacles:
+			if dozer.position.x > o.x0 and dozer.position.x < o.x1 \
+					and dozer.position.z > o.z0 and dozer.position.z < o.z1:
+				_smoke_violations += 1
+		if _smoke_ticks == 300:    # 5 c тарана -> отъехать (из клина web сам не выходит)
+			_script_target = Vector3(0, 0, 10)
+		elif _smoke_ticks == 600:  # -> в створ между столбами
+			_script_target = Vector3(0, 0, 30)
+		elif _smoke_ticks >= 1200:  # 20 c всего
+			var reached := dozer.position.z > 28.0 and absf(dozer.position.x) < 2.0
+			var ok := reached and _smoke_violations == 0
+			print("SMOKE %s: dozer=%s heading=%.2f violations=%d" %
+				["OK" if ok else "FAIL", dozer.position, heading, _smoke_violations])
+			get_tree().quit(0 if ok else 1)
 
 
 func _process(delta: float) -> void:
