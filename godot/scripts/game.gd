@@ -178,6 +178,12 @@ func on_coins_absorbed(pos: Vector3, cnt: int) -> void:
 	fx.sparks(pos.x, pos.z, mini(8, cnt))
 
 
+func on_gate_wave(g: Gate, crossed: int) -> void:
+	shake = minf(0.45, shake + 0.1 + crossed * 0.02)
+	fx.popup(Vector3(g.position.x, 2.6, g.position.z), "x%d" % g.mult, Color("7fe6ff"))
+	# chime('gate') — этап 8
+
+
 func on_gate_unlocked(g: Gate) -> void:
 	shake += 0.3
 	fx.sparks(g.position.x, g.position.z, 22)
@@ -584,6 +590,17 @@ func _setup_smoke() -> void:
 			pool.spawn(Vector3(-0.6 + 0.6 * (i % 3), 0.1, 15.4 + 0.55 * floorf(i / 3.0)), false)
 		dozer.position = Vector3(0, 0, 12)
 		_script_target = Vector3(0, 0, 19.5)
+	elif _smoke_mode == "wave":
+		# Ворота-1 принудительно открыты; монета worth=1 катится сквозь.
+		# Инвариант: сумма worth активных монет после волны ровно x10.
+		# Стартовые 5 монет источника убираем — чистый учёт.
+		for coin in pool.get_children():
+			if not coin.freeze:
+				pool.release(coin)
+		gates[0].active = true
+		var c := pool.spawn(Vector3(0, 0.15, 18.6), false)
+		c.linear_velocity = Vector3(0, 0, 12.0)  # трение тормозит ~28 м/с²
+		dozer.position = Vector3(0, 0, 5)  # дозер в стороне от створа
 
 
 func _smoke_tick() -> void:
@@ -615,6 +632,20 @@ func _smoke_tick() -> void:
 			var ok: bool = g.active and bank >= 10.0 and books
 			print("SMOKE %s: gate1_active=%s fill=%.0f bank=%.0f active=%d books=%s" %
 				["OK" if ok else "FAIL", g.active, g.fill, bank, pool.active_count(), books])
+			get_tree().quit(0 if ok else 1)
+	elif _smoke_mode == "wave":
+		if _smoke_ticks >= 360:  # 6 c: волна + парковка в створе (анти-фарм)
+			var total_worth := 0
+			var n_active := 0
+			for coin in pool.get_children():
+				if coin.freeze:
+					continue
+				total_worth += coin.worth
+				n_active += 1
+			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			var ok := total_worth == 10 and n_active == 10 and books
+			print("SMOKE %s: worth_sum=%d active=%d books=%s" %
+				["OK" if ok else "FAIL", total_worth, n_active, books])
 			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "push":
 		if _smoke_ticks >= 600:  # 10 c

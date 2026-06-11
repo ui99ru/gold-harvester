@@ -127,7 +127,8 @@ func _curtain(locked: bool) -> Node3D:
 
 func step(_dt: float) -> void:
 	if active:
-		return  # волна — этап 6
+		_step_active()
+		return
 	var cnt := 0
 	for coin in game.pool.get_children():
 		if coin.freeze:
@@ -150,6 +151,61 @@ func step(_dt: float) -> void:
 		_unlock()
 	else:
 		_set_bar()
+
+
+## Открытые ворота: множат ПЕРЕСЕЧЕНИЕ плоскости волной копий (web :408-438).
+## Эдж-триггер с гистерезисом ±0.6: монета в створе сторону не меняет —
+## самопроизвольного размножения нет. Сумма ценности точно x mult.
+func _step_active() -> void:
+	var crossed := 0
+	for coin in game.pool.get_children():
+		if coin.freeze:
+			continue
+		var p: Vector3 = coin.global_position
+		var gx: float = p.x - position.x
+		var gz: float = p.z - position.z
+		var along: float = gx * normal.x + gz * normal.z
+		var lat: float = gx * right.x + gz * right.z
+		if absf(lat) >= HALF_W:
+			continue
+		var was := side[coin.idx]
+		var now_s := -1 if along < -0.6 else (1 if along > 0.6 else 0)
+		if now_s == 0 or now_s == was:
+			continue
+		side[coin.idx] = now_s
+		# Только ВПЕРЁД (со стороны мата); первое наблюдение/назад — регистрация
+		if was != -1 or now_s != 1 or coin.worth >= 300:
+			continue
+		var v: Vector3 = coin.linear_velocity
+		if v.x * normal.x + v.z * normal.z < CFG.GATE_MIN_V:
+			continue  # просачивание под давлением кучи (медленно) не множит
+		var w: int = coin.worth
+		var k: int = mini(mult - 1, mini(CFG.GATE_BURST, game.pool.free_count()))
+		coin.worth = w * (mult - k)
+		for c in k:
+			var fz: float = 0.9 + game.rnd() * 0.9
+			var sl: float = clampf(lat + (game.rnd() - 0.5) * 2.5,
+				-CFG.LANE_HALF + 0.6, CFG.LANE_HALF - 0.6)
+			var vf: float = now_s * (CFG.BURST_FWD + game.rnd() * 2.5)
+			var vl: float = (game.rnd() - 0.5) * 3.0
+			var copy: RigidBody3D = game.pool.spawn(Vector3(
+				position.x + normal.x * now_s * fz + right.x * sl,
+				0.5 + game.rnd() * 0.7,
+				position.z + normal.z * now_s * fz + right.z * sl), false)
+			if copy == null:
+				break
+			copy.worth = w
+			for cb in game.side_resetters:
+				cb.call(copy.idx)  # копия: чистая регистрация, без срабатывания
+			copy.linear_velocity = Vector3(
+				normal.x * vf + right.x * vl,
+				CFG.BURST_UP + game.rnd() * 2.0,
+				normal.z * vf + right.z * vl)
+			copy.angular_velocity = Vector3(
+				(game.rnd() - 0.5) * 14.0, 0, (game.rnd() - 0.5) * 14.0)
+		crossed += 1
+	if crossed > 0:
+		game.on_gate_wave(self, crossed)  # ОДИН джус-залп на кадр, не 25 попапов
 
 
 func _unlock() -> void:
