@@ -625,6 +625,21 @@ func sim_step(dt: float) -> void:
 		_emit_dust()
 	dozer_pos = dozer.position
 	dozer_shadow.position = Vector3(dozer.position.x, 0.04, dozer.position.z)
+	# Активный пузырь: дальние осевшие монеты усыпляем принудительно — дозер их
+	# всё равно не трогает, а Jolt сам будит их контактом при подъезде. Бьёт по
+	# корню лага «монеты в ковше»: разбуженная куча держала 70-150 бодрствующих
+	# тяжёлых цилиндров; пузырь срезал до ~17 (worktree-замер). Радиус 7 м.
+	if Engine.get_physics_frames() % 10 == 0:
+		var dz := dozer.position
+		for coin in pool.get_children():
+			if coin.freeze or coin.sleeping:
+				continue
+			var p: Vector3 = coin.global_position
+			var dx := p.x - dz.x
+			var dzz := p.z - dz.z
+			if dx * dx + dzz * dzz > 49.0 and p.y < 0.6 \
+					and coin.linear_velocity.length_squared() < 1.0:
+				coin.sleeping = true
 	# Экономика (web stepEconomy; физика монет шагает движком после)
 	for gt in gates:
 		gt.step(dt)

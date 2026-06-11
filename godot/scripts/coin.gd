@@ -73,7 +73,7 @@ func _ready() -> void:
 	angular_damp = 0.9                                   # rapier angDamp
 	can_sleep = true
 	contact_monitor = true                               # нужен для get_contact_count в _integrate_forces
-	max_contacts_reported = 2
+	max_contacts_reported = 1                            # для звона хватает 1 точки; меньше репортов = дешевле
 
 	var cs := CollisionShape3D.new()
 	cs.shape = _shape
