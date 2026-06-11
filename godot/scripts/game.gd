@@ -74,6 +74,8 @@ var _max_spawn_burst := 0
 var _loop_dir := 1
 var _loop_laps := 0
 var _loop_nodes0 := 0
+var _pool_size_override := 0
+var _gd_accum := 0
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
 var _cal_sun := 1.0
@@ -102,7 +104,7 @@ func _ready() -> void:
 	pool = CoinPool.new()
 	pool.name = "Coins"
 	add_child(pool)
-	pool.setup(CFG.COIN_N, _on_coin_clink)
+	pool.setup(_pool_size_override if _pool_size_override > 0 else CFG.COIN_N, _on_coin_clink)
 	_build_entities()
 	_build_bank_ui()
 	for i in level.start_coins:
@@ -335,6 +337,8 @@ func _parse_user_args() -> void:
 			rng_vis.seed = s ^ 0x9e3779b9
 			test_mode = true
 			seeded = true
+		elif arg.begins_with("--coins="):
+			_pool_size_override = int(arg.get_slice("=", 1))  # свип размера пула
 		elif arg.begins_with("--smoke-"):
 			_smoke_mode = arg.trim_prefix("--smoke-")
 			test_mode = true
@@ -635,6 +639,7 @@ func sim_step(dt: float) -> void:
 	# всё равно не трогает, а Jolt сам будит их контактом при подъезде. Бьёт по
 	# корню лага «монеты в ковше»: разбуженная куча держала 70-150 бодрствующих
 	# тяжёлых цилиндров; пузырь срезал до ~17 (worktree-замер). Радиус 7 м.
+	var _gd0 := Time.get_ticks_usec() if _smoke_mode == "stress" else 0
 	if Engine.get_physics_frames() % 10 == 0:
 		var dz := dozer.position
 		for coin in pool.get_children():
@@ -654,6 +659,8 @@ func sim_step(dt: float) -> void:
 	for tp in trash_pads:
 		tp.step(dt)
 	_update_bank_ui()
+	if _smoke_mode == "stress":
+		_gd_accum += Time.get_ticks_usec() - _gd0  # GDScript-цена циклов O(N)/тик
 
 
 func _emit_dust() -> void:
@@ -951,14 +958,21 @@ func _smoke_tick() -> void:
 			print("SMOKE bucket: avg_physics=%.2f ms (≈телефон %.1f ms)" % [avg_ms, avg_ms * 8.0])
 			get_tree().quit(0)
 	elif _smoke_mode == "stress":
-		_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
-		if _smoke_ticks >= 600:  # 10 c
-			var avg_ms := 1000.0 * _phys_accum / 600.0
-			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
-			var ok := books and pool.active_count() > 900
-			print("SMOKE %s: avg_physics=%.2f ms (≈телефон %.1f ms) active=%d books=%s" %
-				["OK" if ok else "FAIL", avg_ms, avg_ms * 8.0, pool.active_count(), books])
-			get_tree().quit(0 if ok else 1)
+		# Замер ОСЕВШЕЙ кучи: усредняем только последние 5 c (ticks 600..900),
+		# исключая взрыв спавна. Свип размера: ++ --coins=N --smoke-stress.
+		if _smoke_ticks == 600:
+			_phys_max = 0.0  # пик считаем по осевшей куче, не по взрыву спавна
+			_gd_accum = 0
+		if _smoke_ticks > 600:
+			_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+		if _smoke_ticks >= 900:  # 15 c (10 c осесть + 5 c замер)
+			var n := pool.size
+			var phys_ms := 1000.0 * _phys_accum / 300.0
+			var gd_ms := 0.001 * _gd_accum / 300.0   # GDScript экономика+пузырь, мс/кадр
+			var total := phys_ms + gd_ms
+			print("SMOKE stress: N=%d phys=%.2f gd=%.2f total=%.2f ms (≈телефон %.0f ms) active=%d peak=%.1f" %
+				[n, phys_ms, gd_ms, total, total * 8.0, pool.active_count(), 1000.0 * _phys_max])
+			get_tree().quit(0)
 	elif _smoke_mode == "knife":
 		if _smoke_ticks >= 240:  # 4 c
 			var bh_ok := absf(up_blade_half - 2.1) < 0.001
