@@ -38,6 +38,24 @@ static func _ground_image(as_height: bool) -> Image:
 	return img
 
 
+## Красно-белый полосатый шеврон запертых ворот (web gateTex 'red', main.js:158-161).
+## Текст xN — отдельным Label3D поверх.
+static func gate_chevron() -> ImageTexture:
+	var img := Image.create(256, 256, false, Image.FORMAT_RGB8)
+	var red := Color("e8392f")
+	var ca := cos(0.5)
+	var sa := sin(0.5)
+	for j in 256:
+		for i in 256:
+			# инверсия web-поворота на -0.5: поворачиваем координату на +0.5
+			var x := float(i - 128)
+			var y := float(j - 128)
+			var rx := x * ca - y * sa
+			var stripe := fposmod(rx + 320.0, 56.0) < 28.0
+			img.set_pixel(i, j, red if stripe else Color.WHITE)
+	return ImageTexture.create_from_image(img)
+
+
 ## Небо-градиент для рефлексов золота (main.js:18-20): вертикальный, 16x64.
 ## Web: t=0 низ (сине-фиолетовый), t=1 верх (тёплый). В Godot строка 0 = зенит.
 static func sky_panorama() -> ImageTexture:

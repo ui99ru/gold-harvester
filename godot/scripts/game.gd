@@ -34,9 +34,14 @@ var dozer: Dozer
 var dozer_shadow: MeshInstance3D
 var pool: CoinPool
 var clinks: ClinkAudio
+var fx: Fx
+var gates: Array[Gate] = []
 
 # Сущности (ворота, этап 6) сбрасывают side-регистрацию телепортированной монеты
 var side_resetters: Array[Callable] = []
+
+var _bank_label: Label
+var _bank_shown := 0.0
 
 # AABB-препятствия дозера: {x0,x1,z0,z1, post:bool}. Регистрируют сущности
 # (столбы ворот post=true, стойки падов post=false); web main.js:340-353.
@@ -76,10 +81,15 @@ func _ready() -> void:
 	_build_camera()
 	clinks = ClinkAudio.new()
 	add_child(clinks)
+	fx = Fx.new()
+	fx.game = self
+	add_child(fx)
 	pool = CoinPool.new()
 	pool.name = "Coins"
 	add_child(pool)
 	pool.setup(CFG.COIN_N, _on_coin_clink)
+	_build_entities()
+	_build_bank_ui()
 	for i in level.start_coins:
 		place_at_source(pool.spawn(Vector3.ZERO, false))
 	shot = ShotTool.new()
@@ -113,6 +123,66 @@ func _on_coin_clink(pos: Vector3, strength: float) -> void:
 	# Web: контакты -> очередь клинков <=6, памп ~18 Гц (audio.js:81-83).
 	# ClinkAudio троттлит 50 мс (20 Гц) — эквивалент; позиционность — бонус Godot.
 	clinks.clink(pos, strength)
+
+
+func _build_entities() -> void:
+	for e in level.entities:
+		match e.type:
+			"gate":
+				var gt := Gate.new()
+				gt.setup(self, e)
+				add_child(gt)
+				gates.append(gt)
+			# pad_knife / trash — этап 7
+
+
+func _build_bank_ui() -> void:
+	var layer := CanvasLayer.new()
+	add_child(layer)
+	_bank_label = Label.new()
+	_bank_label.text = "0"
+	_bank_label.add_theme_font_size_override("font_size", 44)
+	_bank_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.4))
+	_bank_label.add_theme_constant_override("outline_size", 8)
+	_bank_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_bank_label.offset_top = 12
+	_bank_label.pivot_offset = Vector2(40, 30)
+	layer.add_child(_bank_label)
+
+
+func _update_bank_ui() -> void:
+	_bank_label.text = fmt(bank)
+	if bank > _bank_shown:
+		_bank_shown = bank
+		var tw := create_tween()  # bump как web CSS-класс
+		_bank_label.scale = Vector2(1.35, 1.35)
+		tw.tween_property(_bank_label, "scale", Vector2.ONE, 0.18)
+
+
+static func fmt(n: float) -> String:
+	# web state.js fmt: k/M/B
+	n = roundf(n)
+	if n >= 1e9:
+		return "%.2fB" % (n / 1e9)
+	if n >= 1e6:
+		return "%.2fM" % (n / 1e6)
+	if n >= 1e3:
+		return "%.1fk" % (n / 1e3)
+	return str(int(n))
+
+
+# --- Джус-колбэки сущностей ---
+
+func on_coins_absorbed(pos: Vector3, cnt: int) -> void:
+	clinks.clink(pos, 0.6)
+	fx.sparks(pos.x, pos.z, mini(8, cnt))
+
+
+func on_gate_unlocked(g: Gate) -> void:
+	shake += 0.3
+	fx.sparks(g.position.x, g.position.z, 22)
+	fx.popup(Vector3(g.position.x, 3, g.position.z), "ОТКРЫТО x%d" % g.mult, Color("aef0c0"))
+	# chime('upgrade') — этап 8
 
 
 func _build_dozer() -> void:
@@ -442,7 +512,10 @@ func sim_step(dt: float) -> void:
 	dozer.update_body_poses()  # кинематика ковша/шасси (web setKinematicPoses)
 	dozer_pos = dozer.position
 	dozer_shadow.position = Vector3(dozer.position.x, 0.04, dozer.position.z)
-	# физика монет шагает движком после _physics_process; экономика — этап 5+
+	# Экономика (web stepEconomy; физика монет шагает движком после)
+	for gt in gates:
+		gt.step(dt)
+	_update_bank_ui()
 
 
 func ground_y_under(x: float, z: float) -> float:
@@ -485,12 +558,9 @@ func _resolve_obstacles() -> void:
 
 func _setup_smoke() -> void:
 	if _smoke_mode == "drive":
-		# Столбы как у реальных ворот (x=±4.6, AABB ±0.75). Фаза 1: таран
-		# столба — выталкивание держит (web pushout — слайд, не объезд).
+		# Реальные столбы ворот-1 (x=±4.6, z=20). Фаза 1: таран столба —
+		# выталкивание держит (web pushout — слайд, не объезд).
 		# Фаза 2: проезд в створ до z=30.
-		for sx in [-4.6, 4.6]:
-			obstacles.append({"x0": sx - 0.75, "x1": sx + 0.75,
-				"z0": 19.25, "z1": 20.75, "post": true})
 		_script_target = Vector3(4.6, 0, 20)
 	elif _smoke_mode == "push":
 		# Плотная куча на пути — дозер прёт сквозь на полной скорости.
@@ -507,6 +577,13 @@ func _setup_smoke() -> void:
 				11.0 + 0.8 * (floori(n / 5.0) % 4))
 			n += 1
 		_script_target = Vector3(0, 0, 20)
+	elif _smoke_mode == "gatefill":
+		# 12 монет узкой кучей (в ширину ковша) перед матом ворот-1 —
+		# дозер вталкивает, fill>=10 -> разблок
+		for i in 12:
+			pool.spawn(Vector3(-0.6 + 0.6 * (i % 3), 0.1, 15.4 + 0.55 * floorf(i / 3.0)), false)
+		dozer.position = Vector3(0, 0, 12)
+		_script_target = Vector3(0, 0, 19.5)
 
 
 func _smoke_tick() -> void:
@@ -530,6 +607,14 @@ func _smoke_tick() -> void:
 			var ok := reached and _smoke_violations == 0
 			print("SMOKE %s: dozer=%s heading=%.2f violations=%d" %
 				["OK" if ok else "FAIL", dozer.position, heading, _smoke_violations])
+			get_tree().quit(0 if ok else 1)
+	elif _smoke_mode == "gatefill":
+		if _smoke_ticks >= 900:  # 15 c
+			var g := gates[0]
+			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			var ok: bool = g.active and bank >= 10.0 and books
+			print("SMOKE %s: gate1_active=%s fill=%.0f bank=%.0f active=%d books=%s" %
+				["OK" if ok else "FAIL", g.active, g.fill, bank, pool.active_count(), books])
 			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "push":
 		if _smoke_ticks >= 600:  # 10 c
