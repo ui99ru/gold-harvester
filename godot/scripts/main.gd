@@ -449,8 +449,9 @@ func _finish_smoke_stress() -> void:
 	var avg_ms := 1000.0 * _phys_time_accum / 600.0
 	var no_leak := active_coins() + _pool.size() == POOL_SIZE
 	var ok := no_leak and active_coins() > 0
-	print("SMOKE %s: avg_physics=%.2f ms active=%d pool_free=%d score=%d" %
-		["OK" if ok else "FAIL", avg_ms, active_coins(), _pool.size(), score])
+	# ~8x — измеренный прокси телефона, см. performance_hud.gd PHONE_FACTOR
+	print("SMOKE %s: avg_physics=%.2f ms (≈телефон %.1f ms) active=%d pool_free=%d score=%d" %
+		["OK" if ok else "FAIL", avg_ms, avg_ms * 8.0, active_coins(), _pool.size(), score])
 	get_tree().quit(0 if ok else 1)
 
 
@@ -468,8 +469,9 @@ func _take_shot() -> void:
 		abs_path = ProjectSettings.globalize_path("res://").path_join(_shot_path)
 	DirAccess.make_dir_recursive_absolute(abs_path.get_base_dir())
 	var err := img.save_png(abs_path)
-	print("SHOT %s -> %s | score=%d active=%d pool=%d" %
+	print("SHOT %s -> %s | score=%d active=%d pool=%d | shadows=%s ticks=%d msaa=%d" %
 		[("OK" if err == OK else "FAIL %d" % err), abs_path,
-		score, active_coins(), _pool.size()])
+		score, active_coins(), _pool.size(),
+		sun.shadow_enabled, Engine.physics_ticks_per_second, get_viewport().msaa_3d])
 	_shot_path = ""
 	get_tree().quit(0 if err == OK else 1)
