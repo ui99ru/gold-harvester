@@ -1,0 +1,60 @@
+name: build-android
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.4.1
+
+jobs:
+  export-android:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.4.1
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub переопределяет HOME=/github/home, а образ держит шаблоны в /root
+      - name: Setup export templates and editor settings
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable \
+             ~/.local/share/godot/export_templates/
+          echo "--- env diagnostics ---"
+          ls /usr/lib/jvm/ || true
+          ls /root/debug.keystore || true
+          JDK_DIR=$(ls -d /usr/lib/jvm/java-17-openjdk* | head -n1)
+          if [ ! -f /root/debug.keystore ]; then
+            keytool -genkeypair -keyalg RSA -alias androiddebugkey \
+              -keypass android -storepass android \
+              -keystore /root/debug.keystore \
+              -dname "CN=Android Debug,O=Android,C=US" -validity 9999
+          fi
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-4.4.tres <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/java_sdk_path = "${JDK_DIR}"
+          export/android/android_sdk_path = "/usr/lib/android-sdk"
+          export/android/debug_keystore = "/root/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+
+      - name: Import assets
+        run: godot --headless --path godot --import || true
+
+      - name: Export debug APK
+        run: |
+          mkdir -p godot/build
+          godot --headless --path godot --export-debug "Android" build/zolotodozer-debug.apk
+          ls -lh godot/build/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zolotodozer-debug-apk
+          path: godot/build/zolotodozer-debug.apk
+          if-no-files-found: error
