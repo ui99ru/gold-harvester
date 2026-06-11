@@ -32,6 +32,11 @@ var sun: DirectionalLight3D
 var shot: ShotTool
 var dozer: Dozer
 var dozer_shadow: MeshInstance3D
+var pool: CoinPool
+var clinks: ClinkAudio
+
+# Сущности (ворота, этап 6) сбрасывают side-регистрацию телепортированной монеты
+var side_resetters: Array[Callable] = []
 
 # AABB-препятствия дозера: {x0,x1,z0,z1, post:bool}. Регистрируют сущности
 # (столбы ворот post=true, стойки падов post=false); web main.js:340-353.
@@ -69,13 +74,45 @@ func _ready() -> void:
 	_build_walls()
 	_build_dozer()
 	_build_camera()
+	clinks = ClinkAudio.new()
+	add_child(clinks)
+	pool = CoinPool.new()
+	pool.name = "Coins"
+	add_child(pool)
+	pool.setup(CFG.COIN_N, _on_coin_clink)
+	for i in level.start_coins:
+		place_at_source(pool.spawn(Vector3.ZERO, false))
 	shot = ShotTool.new()
 	shot.info_cb = func() -> String:
-		return "bank=%d dozer=%s heading=%.2f zoom=%.2f" % [bank, dozer.position, heading, cam_zoom]
+		return "bank=%d dozer=%s heading=%.2f zoom=%.2f coins=%d" % [
+			bank, dozer.position, heading, cam_zoom, pool.active_count()]
 	add_child(shot)
 	phase = "play"  # стартовый экран — этап 9
 	_setup_smoke()
 	_update_camera(0.0)
+
+
+## Респаун монеты в источнике (web main.js:151): seeded-разброс + падение
+## с высоты — оседают в кучу некопланарно, солвер стабилен.
+func place_at_source(coin: RigidBody3D) -> void:
+	if coin == null:
+		return
+	var a := rnd() * 6.28
+	var r := sqrt(rnd()) * level.source_radius
+	var y := CFG.COIN_THK * 0.5 + rnd() * 6.0
+	coin.worth = 1
+	for cb in side_resetters:
+		cb.call(coin.idx)  # телепорт != пересечение ворот
+	coin.transform = Transform3D(Basis(),
+		level.source_pos + Vector3(cos(a) * r, y, sin(a) * r))
+	coin.linear_velocity = Vector3.ZERO
+	coin.angular_velocity = Vector3.ZERO
+
+
+func _on_coin_clink(pos: Vector3, strength: float) -> void:
+	# Web: контакты -> очередь клинков <=6, памп ~18 Гц (audio.js:81-83).
+	# ClinkAudio троттлит 50 мс (20 Гц) — эквивалент; позиционность — бонус Godot.
+	clinks.clink(pos, strength)
 
 
 func _build_dozer() -> void:
@@ -402,6 +439,7 @@ func sim_step(dt: float) -> void:
 	ground_lift += (gy - ground_lift) * minf(1.0, dt * (25.0 if gy > ground_lift else 6.0))
 	dozer.position.y = ground_lift + sin(sim_time * 20.0) * 0.02 * minf(1.0, speed_now / 3.0)
 	dozer.anim_tracks(dt, speed_now)
+	dozer.update_body_poses()  # кинематика ковша/шасси (web setKinematicPoses)
 	dozer_pos = dozer.position
 	dozer_shadow.position = Vector3(dozer.position.x, 0.04, dozer.position.z)
 	# физика монет шагает движком после _physics_process; экономика — этап 5+
@@ -454,6 +492,21 @@ func _setup_smoke() -> void:
 			obstacles.append({"x0": sx - 0.75, "x1": sx + 0.75,
 				"z0": 19.25, "z1": 20.75, "post": true})
 		_script_target = Vector3(4.6, 0, 20)
+	elif _smoke_mode == "push":
+		# Плотная куча на пути — дозер прёт сквозь на полной скорости.
+		# Ассерты: ничего не туннелировало в корпус, не провалилось, сгребается.
+		for i in 40:
+			pool.spawn(Vector3.ZERO, false)
+		var n := 0
+		for coin in pool.get_children():
+			if coin.freeze:
+				continue
+			coin.position = Vector3(
+				-1.5 + 0.75 * (n % 5),
+				0.1 + 0.15 * floorf(n / 20.0),
+				11.0 + 0.8 * (floori(n / 5.0) % 4))
+			n += 1
+		_script_target = Vector3(0, 0, 20)
 
 
 func _smoke_tick() -> void:
@@ -477,6 +530,27 @@ func _smoke_tick() -> void:
 			var ok := reached and _smoke_violations == 0
 			print("SMOKE %s: dozer=%s heading=%.2f violations=%d" %
 				["OK" if ok else "FAIL", dozer.position, heading, _smoke_violations])
+			get_tree().quit(0 if ok else 1)
+	elif _smoke_mode == "push":
+		if _smoke_ticks >= 600:  # 10 c
+			var fallen := 0
+			var tunneled := 0
+			var plowed := 0
+			var inv := dozer.global_transform.affine_inverse()
+			for coin in pool.get_children():
+				if coin.freeze:
+					continue
+				var p: Vector3 = coin.global_position
+				if p.y < -0.5:
+					fallen += 1
+				if p.z > 14.5:
+					plowed += 1
+				var lp: Vector3 = inv * p  # локальные координаты дозера
+				if absf(lp.x) < 0.8 and lp.z > -1.2 and lp.z < 1.2 and lp.y < 2.0:
+					tunneled += 1
+			var ok := fallen == 0 and tunneled == 0 and plowed >= 10
+			print("SMOKE %s: fallen=%d tunneled=%d plowed=%d active=%d" %
+				["OK" if ok else "FAIL", fallen, tunneled, plowed, pool.active_count()])
 			get_tree().quit(0 if ok else 1)
 
 

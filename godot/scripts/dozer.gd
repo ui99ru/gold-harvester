@@ -127,14 +127,18 @@ func _build_visual() -> void:
 # --- Кинематические тела (порт physics.js:87-115) ---
 
 func _build_bodies(hx: float) -> void:
+	# top_level: тела НЕ наследуют transform дозера — позы сетятся явно каждый
+	# физ-тик (update_body_poses, аналог web setKinematicPoses). Движение через
+	# СВОЙ transform обязательно: sync_to_physics не видит движение родителя,
+	# и спящие монеты не будятся (дозер проходит сквозь кучу призраком).
 	var pm := PhysicsMaterial.new()
 	pm.friction = 0.8
 	pm.bounce = 0.05
 	blade_body = AnimatableBody3D.new()
 	blade_body.name = "BladeBody"
 	blade_body.sync_to_physics = true
+	blade_body.top_level = true
 	blade_body.physics_material_override = pm
-	blade_body.position = Vector3(0, 0, BLADE_FWD)
 	add_child(blade_body)
 	_build_blade_shapes(hx)
 
@@ -144,8 +148,18 @@ func _build_bodies(hx: float) -> void:
 	chassis_body = AnimatableBody3D.new()
 	chassis_body.name = "ChassisBody"
 	chassis_body.sync_to_physics = true
+	chassis_body.top_level = true
 	chassis_body.physics_material_override = pm2
 	add_child(chassis_body)
+	update_body_poses()
+
+
+func update_body_poses() -> void:
+	# Порт web setKinematicPoses (main.js:385-391): ковш на выносе BLADE_FWD,
+	# шасси в основании; только yaw + высота (groundLift/бобинг в position.y)
+	var t := global_transform
+	blade_body.global_transform = t * Transform3D(Basis(), Vector3(0, 0, BLADE_FWD))
+	chassis_body.global_transform = t
 	# web main.js:303: фронт-низ (стык до ковша) + короб-высокий
 	_add_shape(chassis_body, Vector3(2.0, 1.0, 1.0), Vector3(0, 0.5, 0.5), 0.0)
 	_add_shape(chassis_body, Vector3(1.7, 2.4, 1.8), Vector3(0, 1.2, 0), 0.0)
