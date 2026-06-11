@@ -748,6 +748,20 @@ func _setup_smoke() -> void:
 		var c := pool.spawn(Vector3(0, 0.15, 18.6), false)
 		c.linear_velocity = Vector3(0, 0, 12.0)  # трение тормозит ~28 м/с²
 		dozer.position = Vector3(0, 0, 5)  # дозер в стороне от створа
+	elif _smoke_mode == "bucket":
+		# Чистое репро лага «монеты в ковше» (БЕЗ ворот): куча у источника,
+		# дозер возит её челноком в зоне z∈[4,14], не доезжая до мата ворот
+		# (z≈16.7). Изолирует стоимость сжатой массы в чаше от каскада волны.
+		var n := 0
+		for i in 150:
+			var c := pool.spawn(Vector3.ZERO, false)
+			c.position = Vector3(
+				-2.0 + 0.5 * (n % 9),
+				0.1 + 0.3 * floorf(n / 135.0),
+				7.0 + 0.5 * (floori(n / 9.0) % 6))
+			n += 1
+		dozer.position = Vector3(0, 0, 4)
+		_script_target = Vector3(0, 0, 13)
 
 
 func _smoke_tick() -> void:
@@ -780,6 +794,36 @@ func _smoke_tick() -> void:
 			print("SMOKE %s: gate1_active=%s fill=%.0f bank=%.0f active=%d books=%s" %
 				["OK" if ok else "FAIL", g.active, g.fill, bank, pool.active_count(), books])
 			get_tree().quit(0 if ok else 1)
+	elif _smoke_mode == "bucket":
+		_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+		if _smoke_ticks % 60 == 0:
+			# Считаем монеты в чаше ковша (локальные координаты blade_body)
+			var inv := dozer.blade_body.global_transform.affine_inverse()
+			var in_bucket := 0
+			var awake := 0
+			var max_pen := 0.0
+			for coin in pool.get_children():
+				if coin.freeze:
+					continue
+				if not coin.sleeping:
+					awake += 1
+				var lp: Vector3 = inv * coin.global_position
+				if absf(lp.x) < 1.2 and lp.z > -0.6 and lp.z < 1.7 and lp.y < 1.4:
+					in_bucket += 1
+			var ms := 1000.0 * _phys_accum / _smoke_ticks
+			print("bucket t=%d dozer_z=%.1f in_bucket=%d awake=%d max_pen=%.3f avg_ms=%.2f" %
+				[_smoke_ticks, dozer.position.z, in_bucket, awake, max_pen, ms])
+		# Челнок: вперёд до 13, назад до 5, повтор — монеты остаются в ковше
+		if _smoke_ticks == 180:
+			_script_target = Vector3(0, 0, 5)
+		elif _smoke_ticks == 360:
+			_script_target = Vector3(0, 0, 13)
+		elif _smoke_ticks == 540:
+			_script_target = Vector3(0, 0, 5)
+		if _smoke_ticks >= 720:  # 12 c
+			var avg_ms := 1000.0 * _phys_accum / 600.0
+			print("SMOKE bucket: avg_physics=%.2f ms (≈телефон %.1f ms)" % [avg_ms, avg_ms * 8.0])
+			get_tree().quit(0)
 	elif _smoke_mode == "stress":
 		_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 		if _smoke_ticks >= 600:  # 10 c
