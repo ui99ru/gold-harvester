@@ -466,25 +466,60 @@ func _build_ground_and_rocks() -> void:
 	gbody.add_child(cs)
 	add_child(gbody)
 
-	# 50 камней-додекаэдров по кругу (main.js:43-44, rnd-поток)
+	# Кольцо скал — граница сцены (правка по рефу): плотная стена камней по
+	# окружности уровня + невидимый StaticBody-многоугольник держит монеты.
+	# Дозер клэмпится радиально в sim_step. Вне кольца — редкие дальние камни.
 	var rock_mat := StandardMaterial3D.new()
 	rock_mat.albedo_color = Color("8f72c8")
 	rock_mat.roughness = 1.0
-	for i in 50:
+	var rc := level.ring_center
+	var rr := level.ring_radius
+	if rr > 0.0:
+		for i in 80:  # плотное кольцо: ~0.08 рад между камнями, перекрываются
+			var a := (i / 80.0) * TAU + (rnd() - 0.5) * 0.05
+			var r := rr + 1.5 + rnd() * 3.0  # чуть снаружи барьера
+			# Южная дуга (между камерой и сценой) — низкий бордюр, не загораживает
+			var south := clampf(-sin(a), 0.0, 1.0)  # 1 на юге, 0 на севере
+			var s := lerpf(2.5 + rnd() * 4.0, 1.0 + rnd() * 0.8, south)
+			_add_rock(rock_mat, Vector3(rc.x + cos(a) * r, s * 0.4 - 0.5, rc.z + sin(a) * r), s)
+		# Невидимый барьер: 32 box-сегмента по хорде окружности
+		var wall := StaticBody3D.new()
+		wall.name = "RingWall"
+		var pm_ring := PhysicsMaterial.new()
+		pm_ring.friction = 0.3
+		pm_ring.bounce = 0.0
+		wall.physics_material_override = pm_ring
+		add_child(wall)
+		var seg_len := TAU * rr / 32.0 + 0.8  # нахлёст против щелей
+		for i in 32:
+			var a := (i + 0.5) / 32.0 * TAU
+			var seg := CollisionShape3D.new()
+			var seg_box := BoxShape3D.new()
+			seg_box.size = Vector3(seg_len, 6.0, 1.0)
+			seg.shape = seg_box
+			seg.position = Vector3(rc.x + cos(a) * rr, 1.5, rc.z + sin(a) * rr)
+			seg.rotation.y = -a + PI / 2.0  # хорда перпендикулярна радиусу
+			wall.add_child(seg)
+	# Дальние декоративные камни (как web, реже)
+	for i in 24:
 		var a := rnd() * 6.28
 		var r := 70.0 + rnd() * 35.0
 		var s := 3.0 + rnd() * 5.0
-		var m := MeshInstance3D.new()
-		var sph := SphereMesh.new()     # low-poly аналог DodecahedronGeometry
-		sph.radius = s
-		sph.height = s * 2.0
-		sph.radial_segments = 6
-		sph.rings = 3
-		m.mesh = sph
-		m.material_override = rock_mat
-		m.position = Vector3(cos(a) * r, s * 0.5 - 0.5, sin(a) * r)
-		m.rotation = Vector3(rnd() * 3, rnd() * 3, rnd() * 3)
-		add_child(m)
+		_add_rock(rock_mat, Vector3(cos(a) * r, s * 0.5 - 0.5, sin(a) * r), s)
+
+
+func _add_rock(mat: Material, pos: Vector3, s: float) -> void:
+	var m := MeshInstance3D.new()
+	var sph := SphereMesh.new()     # low-poly аналог DodecahedronGeometry
+	sph.radius = s
+	sph.height = s * 2.0
+	sph.radial_segments = 6
+	sph.rings = 3
+	m.mesh = sph
+	m.material_override = mat
+	m.position = pos
+	m.rotation = Vector3(rnd() * 3, rnd() * 3, rnd() * 3)
+	add_child(m)
 
 
 func _build_walls() -> void:
@@ -617,6 +652,15 @@ func sim_step(dt: float) -> void:
 	dozer.position.x += sin(heading) * speed_now * dt
 	dozer.position.z += cos(heading) * speed_now * dt
 	_resolve_obstacles()
+	# Кольцо скал: дозер не выезжает за границу сцены (радиальный клэмп)
+	if level.ring_radius > 0.0:
+		var off := Vector2(dozer.position.x - level.ring_center.x,
+			dozer.position.z - level.ring_center.z)
+		var max_r := level.ring_radius - DOZER_R - 0.5
+		if off.length_squared() > max_r * max_r:
+			off = off.normalized() * max_r
+			dozer.position.x = level.ring_center.x + off.x
+			dozer.position.z = level.ring_center.z + off.y
 	dozer.rotation.y = heading
 	# Высота опоры: max по центру/носу + упреждение; вверх быстро, вниз плавно
 	var sn := sin(heading)

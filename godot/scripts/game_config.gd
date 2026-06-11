@@ -5,7 +5,7 @@ class_name CFG
 # --- Рендер / атмосфера ---
 const EXPOSURE := 0.92
 const BG_COLOR := Color("7c6cb2")
-const GROUND_COLOR := Color("9c8fc0")     # лавандовый грунт (реф!), не серый
+const GROUND_COLOR := Color("8e8c94")     # серый текстурированный грунт (правка по рефу)
 const FOG_NEAR := 120.0
 const FOG_FAR := 360.0
 const SUN_INT := 1.5

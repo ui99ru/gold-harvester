@@ -144,4 +144,6 @@ source_pos = Vector3(0, 0, 9)
 source_radius = 0.8
 start_coins = 5
 dozer_start = Vector3(0, 0, 0)
+ring_center = Vector3(0, 0, 31)
+ring_radius = 32.0
 entities = Array[ExtResource("2")]([SubResource("w01"), SubResource("w02"), SubResource("w03"), SubResource("w04"), SubResource("w05"), SubResource("w06"), SubResource("w07"), SubResource("w08"), SubResource("w09"), SubResource("w10"), SubResource("w11"), SubResource("gate1"), SubResource("gate2"), SubResource("pad_knife"), SubResource("trash")])

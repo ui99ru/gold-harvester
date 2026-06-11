@@ -15,9 +15,11 @@ import numpy as np
 
 SR = 44100
 DUR = 3.0
-RATE = 8.0          # путтов/с при sp=0.5
+# v2 «характерный двигатель» (фидбэк: v1 звучал как стук по барабанам):
+# путты чаще и мягче -> сливаются в тарахтение, корпус громче, клаттер/ВЧ тише
+RATE = 13.0         # путтов/с (v1: 8 — слишком раздельные удары)
 PITCH = 82.0        # 74 + 0.5*16
-BED_LEVEL = 0.16    # корпус относительно путтов (web 0.12/0.9 при sp=0.5)
+BED_LEVEL = 0.34    # корпус громче — фундамент мотора (v1: 0.16)
 OUT = Path(__file__).resolve().parent.parent / "godot" / "assets" / "audio" / "engine_loop.wav"
 
 rng = np.random.default_rng(20260611)
@@ -69,21 +71,22 @@ def _biquad(x, b0, b1, b2, a1, a2):
 
 
 def putt(pitch, amp):
-    """Один «туп» зажигания: square+lp700 с env, клаттер bp2200, ВЧ hp9000."""
-    n = int(SR * 0.1)
+    """Один «туп» зажигания: square+lp520 с длинным env, тихий клаттер/ВЧ."""
+    n = int(SR * 0.12)
     t = np.arange(n) / SR
     sq = np.sign(np.sin(2 * np.pi * pitch * t))
+    # v2: атака мягче (6 мс), хвост длиннее (90 мс) — «туп», не «щелчок»
     env = np.where(
-        t < 0.004,
-        0.0001 * (amp * 0.9 / 0.0001) ** (t / 0.004),
-        amp * 0.9 * (0.0006 / (amp * 0.9)) ** np.clip((t - 0.004) / 0.066, 0, 1))
-    body = _biquad(sq * env, *_lp_coef(700, 0.7071))
+        t < 0.006,
+        0.0001 * (amp * 0.9 / 0.0001) ** (t / 0.006),
+        amp * 0.9 * (0.0006 / (amp * 0.9)) ** np.clip((t - 0.006) / 0.090, 0, 1))
+    body = _biquad(sq * env, *_lp_coef(520, 0.7071))
 
     nb = (rng.random(900) * 2 - 1) * (1 - np.arange(900) / 900) ** 3
-    clatter = _biquad(nb, *_bp_coef(2200, 0.8)) * amp * 0.5
+    clatter = _biquad(nb, *_bp_coef(2200, 0.8)) * amp * 0.22
 
     n2 = (rng.random(200) * 2 - 1) * (1 - np.arange(200) / 200) ** 4
-    hiss = _biquad(n2, *_hp_coef(9000, 0.7071)) * amp * 0.18
+    hiss = _biquad(n2, *_hp_coef(9000, 0.7071)) * amp * 0.07
 
     out = body.copy()
     out[:900] += clatter
@@ -102,8 +105,9 @@ saw = 2.0 * ((tt * bed_freq) % 1.0) - 1.0
 bed = _biquad(saw, *_lp_coef(240, 0.7071)) * BED_LEVEL
 
 # Путты: интервалы с джиттером, нормированные ровно на DUR
+# v2: джиттер мягче (±11%) — ровнее тарахтение, меньше «барабанной дроби»
 n_putts = int(RATE * DUR)
-ivals = 1.0 + (rng.random(n_putts) - 0.5) * 0.36
+ivals = 1.0 + (rng.random(n_putts) - 0.5) * 0.22
 ivals *= DUR / ivals.sum()
 t0 = 0.0
 for iv in ivals:
