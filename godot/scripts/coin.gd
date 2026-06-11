@@ -49,7 +49,12 @@ static func _ensure_shared() -> void:
 	_mesh.radial_segments = 24
 
 	_material = StandardMaterial3D.new()                 # палитра web-версии
-	_material.albedo_color = Color("ffb42e")
+	# Цвета впечены в атлас (TexGen.coin_atlas: грань #ffb42e + гравировка,
+	# бок #e0a52e), albedo белый. Рельеф — normal из bump-карты (web bumpScale 1.4).
+	_material.albedo_color = Color.WHITE
+	_material.albedo_texture = TexGen.coin_atlas()
+	_material.normal_enabled = true
+	_material.normal_texture = TexGen.coin_normal()
 	_material.metallic = 0.42
 	_material.roughness = 0.36
 	_material.emission_enabled = true

@@ -30,6 +30,7 @@ var test_mode := false   # детерминированный прогон: ка
 var level: LevelDef
 var camera: Camera3D
 var sun: DirectionalLight3D
+var world_env: Environment
 var shot: ShotTool
 var dozer: Dozer
 var dozer_shadow: MeshInstance3D
@@ -46,6 +47,7 @@ var side_resetters: Array[Callable] = []
 
 var _bank_label: Label
 var _bank_shown := 0.0
+var _start_overlay: Control
 
 # AABB-препятствия дозера: {x0,x1,z0,z1, post:bool}. Регистрируют сущности
 # (столбы ворот post=true, стойки падов post=false); web main.js:340-353.
@@ -103,7 +105,11 @@ func _ready() -> void:
 		return "bank=%d dozer=%s heading=%.2f zoom=%.2f coins=%d" % [
 			bank, dozer.position, heading, cam_zoom, pool.active_count()]
 	add_child(shot)
-	phase = "play"  # стартовый экран — этап 9
+	_build_hud_and_menu()
+	# Авто-старт в харнесс-режимах; иначе — стартовый экран
+	if test_mode or not OS.get_cmdline_user_args().is_empty():
+		phase = "play"
+		_start_overlay.visible = false
 	_setup_smoke()
 	_update_camera(0.0)
 
@@ -172,6 +178,76 @@ func _update_bank_ui() -> void:
 		var tw := create_tween()  # bump как web CSS-класс
 		_bank_label.scale = Vector2(1.35, 1.35)
 		tw.tween_property(_bank_label, "scale", Vector2.ONE, 0.18)
+
+
+func _build_hud_and_menu() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 2
+	add_child(layer)
+
+	# Стартовый экран (web #start)
+	_start_overlay = ColorRect.new()
+	_start_overlay.color = Color(0.18, 0.13, 0.3, 0.75)
+	_start_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(_start_overlay)
+	var title := Label.new()
+	title.text = "ЗОЛОТОДОЗЕР"
+	title.add_theme_font_size_override("font_size", 64)
+	title.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	title.offset_top = -140
+	title.offset_left = -240
+	_start_overlay.add_child(title)
+	var btn := Button.new()
+	btn.text = "СТАРТ"
+	btn.add_theme_font_size_override("font_size", 40)
+	btn.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	btn.offset_left = -110
+	btn.offset_right = 110
+	btn.offset_top = -10
+	btn.offset_bottom = 80
+	btn.pressed.connect(func() -> void:
+		phase = "play"
+		_start_overlay.visible = false)
+	_start_overlay.add_child(btn)
+
+	# Mute (web #mute)
+	var mute := Button.new()
+	mute.text = "🔊"
+	mute.add_theme_font_size_override("font_size", 28)
+	mute.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	mute.offset_left = -76
+	mute.offset_top = 12
+	mute.offset_right = -16
+	mute.offset_bottom = 72
+	mute.pressed.connect(func() -> void:
+		mute.text = "🔇" if audio.toggle_mute() else "🔊")
+	layer.add_child(mute)
+
+	# Performance HUD + тумблеры тюнинга (петля «десктоп + прокси телефона»)
+	var hud := preload("res://scripts/performance_hud.gd").new()
+	hud.pool_stats_cb = func() -> Vector2i:
+		return Vector2i(pool.active_count(), pool.free_count())
+	hud.spawn_50_cb = func() -> void:
+		for i in 50:
+			place_at_source(pool.spawn(Vector3.ZERO, false))
+	hud.toggles = [
+		["Тени", true, func(on: bool) -> void:
+			sun.shadow_enabled = on],
+		["Тики 50", false, func(on: bool) -> void:
+			Engine.physics_ticks_per_second = 50 if on else 60],
+		["MSAA 2x", true, func(on: bool) -> void:
+			get_viewport().msaa_3d = Viewport.MSAA_2X if on else Viewport.MSAA_DISABLED],
+		["Glow", true, func(on: bool) -> void:
+			world_env.glow_enabled = on],
+		["Звон", true, func(on: bool) -> void:
+			clinks.enabled = on
+			for coin in pool.get_children():
+				coin.contact_monitor = on],
+		["Завал плашмя", true, func(on: bool) -> void:
+			for coin in pool.get_children():
+				coin.calm_flatten = on],
+	]
+	add_child(hud)
 
 
 static func fmt(n: float) -> String:
@@ -331,6 +407,7 @@ func _build_environment() -> void:
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
+	world_env = env
 
 	sun = DirectionalLight3D.new()
 	sun.light_color = Color("fff4de")
@@ -542,6 +619,9 @@ func sim_step(dt: float) -> void:
 	dozer.anim_tracks(dt, speed_now)
 	dozer.update_body_poses()  # кинематика ковша/шасси (web setKinematicPoses)
 	audio.pump_engine(minf(1.0, speed_now / up_move), phase == "play")
+	# Пыль из-под траков (web :377, :247)
+	if speed_now > 3.5 and rndv() < 0.6:
+		_emit_dust()
 	dozer_pos = dozer.position
 	dozer_shadow.position = Vector3(dozer.position.x, 0.04, dozer.position.z)
 	# Экономика (web stepEconomy; физика монет шагает движком после)
@@ -552,6 +632,19 @@ func sim_step(dt: float) -> void:
 	for tp in trash_pads:
 		tp.step(dt)
 	_update_bank_ui()
+
+
+func _emit_dust() -> void:
+	var f := sin(heading)
+	var cf := cos(heading)
+	var bx := dozer.position.x - f * 1.6
+	var bz := dozer.position.z - cf * 1.6
+	for sx: float in [-0.9, 0.9]:
+		fx.emit(bx + cf * sx + (rndv() - 0.5) * 0.3, 0.18,
+			bz - f * sx + (rndv() - 0.5) * 0.3, {
+			"color": Color("9a92a8"), "life": 0.55, "size": 0.5, "size1": 1.3,
+			"vy": 0.5, "grav": 0.4,
+			"vx": (rndv() - 0.5) * 0.6, "vz": (rndv() - 0.5) * 0.6, "fade": 0.32})
 
 
 func ground_y_under(x: float, z: float) -> float:

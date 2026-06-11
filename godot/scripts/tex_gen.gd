@@ -38,6 +38,65 @@ static func _ground_image(as_height: bool) -> Image:
 	return img
 
 
+## Атлас монеты под UV CylinderMesh (бок — верхняя половина, крышки — два круга
+## снизу): грань web coinFaceTex (main.js:115-127) = кольцевое углубление +
+## звезда-гравировка, затонированная золотом; бок — золото темнее (#e0a52e).
+static func coin_atlas() -> ImageTexture:
+	return ImageTexture.create_from_image(_coin_image(false))
+
+
+static func coin_normal() -> ImageTexture:
+	var img := _coin_image(true)
+	img.bump_map_to_normal_map(1.4)
+	return ImageTexture.create_from_image(img)
+
+
+static func _coin_image(as_height: bool) -> Image:
+	var s := 256
+	var img := Image.create(s, s, false, Image.FORMAT_RGB8)
+	var gold := CFG.COIN_COLOR
+	var side := Color("e0a52e")
+	var dark := Color("3a2406")
+	img.fill(Color(0.6, 0.6, 0.6) if as_height else side)
+	for cap_cx: int in [64, 192]:  # два круга-крышки в нижней половине
+		for j in range(128, 256):
+			for i in range(cap_cx - 64, cap_cx + 64):
+				var dx := (i - cap_cx) / 64.0
+				var dy := (j - 192) / 64.0
+				var r := Vector2(dx, dy).length()
+				if r > 1.0:
+					continue
+				if as_height:
+					var h := 0.6
+					if absf(r - 0.86) < 0.06:
+						h = 1.0                      # приподнятый ободок
+					elif absf(r - 0.72) < 0.05:
+						h = 0.16                     # кольцевое углубление
+					elif _in_star(dx, dy):
+						h = 0.15                     # звезда — углубление
+					img.set_pixel(i, j, Color(h, h, h))
+				else:
+					var c := gold
+					c = c.lerp(dark, 0.32 * clampf((r - 0.34) / 0.66, 0.0, 1.0))  # округлость
+					if absf(r - 0.78) < 0.04:
+						c = c.lerp(dark, 0.5)        # кольцевое углубление
+					elif absf(r - 0.72) < 0.015:
+						c = c.lerp(Color.WHITE, 0.45)  # блик-ободок
+					if _in_star(dx, dy):
+						c = c.lerp(dark, 0.42)       # знак-звезда
+					img.set_pixel(i, j, c)
+	return img
+
+
+## Точка внутри 5-конечной звезды (web: 10 вершин, r 19/8 от 64 -> 0.30/0.125)
+static func _in_star(dx: float, dy: float) -> bool:
+	var a := atan2(dy, dx) + PI / 2.0
+	var seg := fposmod(a, PI / 2.5) / (PI / 2.5)   # сектор между лучами
+	var k := minf(seg, 1.0 - seg) * 2.0            # 0 у луча, 1 между
+	var rr := lerpf(0.30, 0.125, k)
+	return Vector2(dx, dy).length() < rr
+
+
 ## Красно-белый полосатый шеврон запертых ворот (web gateTex 'red', main.js:158-161).
 ## Текст xN — отдельным Label3D поверх.
 static func gate_chevron() -> ImageTexture:
