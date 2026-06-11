@@ -58,7 +58,7 @@ func step(dt: float) -> void:
 		acc += cnt
 		if cd <= 0.0:
 			game.fx.popup(Vector3(position.x, 2.2, position.z), "-%d" % acc, Color("ff6a5e"))
-			# chime('trash') — этап 8
+			game.audio.chime("trash")
 			cd = 0.6
 			acc = 0
 

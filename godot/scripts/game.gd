@@ -35,6 +35,7 @@ var dozer: Dozer
 var dozer_shadow: MeshInstance3D
 var pool: CoinPool
 var clinks: ClinkAudio
+var audio: GameAudio
 var fx: Fx
 var gates: Array[Gate] = []
 var pads: Array[UpgradePad] = []
@@ -84,6 +85,8 @@ func _ready() -> void:
 	_build_camera()
 	clinks = ClinkAudio.new()
 	add_child(clinks)
+	audio = GameAudio.new()
+	add_child(audio)
 	fx = Fx.new()
 	fx.game = self
 	add_child(fx)
@@ -193,14 +196,14 @@ func on_coins_absorbed(pos: Vector3, cnt: int) -> void:
 func on_gate_wave(g: Gate, crossed: int) -> void:
 	shake = minf(0.45, shake + 0.1 + crossed * 0.02)
 	fx.popup(Vector3(g.position.x, 2.6, g.position.z), "x%d" % g.mult, Color("7fe6ff"))
-	# chime('gate') — этап 8
+	audio.chime("gate")
 
 
 func on_gate_unlocked(g: Gate) -> void:
 	shake += 0.3
 	fx.sparks(g.position.x, g.position.z, 22)
 	fx.popup(Vector3(g.position.x, 3, g.position.z), "ОТКРЫТО x%d" % g.mult, Color("aef0c0"))
-	# chime('upgrade') — этап 8
+	audio.chime("upgrade")
 
 
 func on_pad_upgraded(pd: UpgradePad) -> void:
@@ -210,7 +213,7 @@ func on_pad_upgraded(pd: UpgradePad) -> void:
 	pads.erase(pd)
 	shake += 0.34
 	fx.sparks(pd.position.x, pd.position.z, 22)
-	# chime('upgrade') — этап 8
+	audio.chime("upgrade")
 
 
 func _build_dozer() -> void:
@@ -538,6 +541,7 @@ func sim_step(dt: float) -> void:
 	dozer.position.y = ground_lift + sin(sim_time * 20.0) * 0.02 * minf(1.0, speed_now / 3.0)
 	dozer.anim_tracks(dt, speed_now)
 	dozer.update_body_poses()  # кинематика ковша/шасси (web setKinematicPoses)
+	audio.pump_engine(minf(1.0, speed_now / up_move), phase == "play")
 	dozer_pos = dozer.position
 	dozer_shadow.position = Vector3(dozer.position.x, 0.04, dozer.position.z)
 	# Экономика (web stepEconomy; физика монет шагает движком после)
