@@ -119,7 +119,7 @@ func _build_tray() -> void:
 	# толкателя упираются в кромку капота и ссыпаются на дно в зону подметания.
 	# Низ капота 1.05 — чуть выше крыши толкателя (1.0), он скользит под капотом.
 	var hood_z_from := -half_l
-	var hood_z_to := -1.85
+	var hood_z_to := -1.2
 	_add_box(body, Vector3(TRAY_W, 0.55, hood_z_to - hood_z_from),
 		Vector3(0, 1.05 + 0.275, (hood_z_from + hood_z_to) / 2.0), mat)
 	# Передний край (z = +half_l) открыт — обрыв, зона сбора ниже (этап 3)
@@ -127,9 +127,10 @@ func _build_tray() -> void:
 
 func _build_pusher() -> void:
 	# В локальном (наклонном) пространстве лотка: скользит по дну у задней стенки
-	# Ход фронта: z ∈ [-2.1, +1.5]; в крайнем заднем положении тыл вплотную к стенке
+	# Ход фронта: z ∈ [-1.1, +2.5] — ближе к обрыву, свободная зона ~2 м:
+	# куча не находит статического равновесия, излишек сваливается
 	var pusher := PUSHER_SCENE.instantiate()
-	pusher.position = Vector3(0, 0.5, -1.3)
+	pusher.position = Vector3(0, 0.5, -0.3)
 	tray.add_child(pusher)
 
 
@@ -320,10 +321,13 @@ func _parse_user_args() -> void:
 		if arg.begins_with("--shot="):
 			_shot_path = arg.trim_prefix("--shot=")
 			_shot_frames_left = maxi(_shot_frames_left, 20)  # дать кадрам отрисоваться
-		elif arg == "--drop-demo":
-			# 50 монет для визуальной проверки (вместе с --shot)
-			_shot_frames_left = 150
-			for i in 50:
+		elif arg.begins_with("--drop-demo"):
+			# N монет для визуальной проверки (вместе с --shot): --drop-demo=240
+			var n := 50
+			if "=" in arg:
+				n = int(arg.get_slice("=", 1))
+			_shot_frames_left = 150 if n <= 50 else 900  # большой куче дать осесть
+			for i in n:
 				spawn_coin(Vector3(randf_range(-3, 3), 1.6 + (i % 5) * 0.3,
 					randf_range(-1.0, 4.0)))
 		elif arg.begins_with("--smoke-"):
@@ -352,6 +356,11 @@ func _parse_user_args() -> void:
 				-3.6 + 0.8 * (i % 10),
 				2.0 + 0.4 * floorf(i / 50.0),
 				-0.6 + 1.1 * (floori(i / 10.0) % 5)))
+	elif _smoke_mode == "jam":
+		# Сценарий «затор»: 240 монет, толкатель должен свалить излишек за 15 с
+		for i in 240:
+			spawn_coin(Vector3(randf_range(-3, 3), 1.6 + (i % 5) * 0.3,
+				randf_range(-1.0, 4.0)))
 
 
 func _physics_process(_delta: float) -> void:
@@ -373,6 +382,8 @@ func _physics_process(_delta: float) -> void:
 		_finish_smoke_pusher()
 	elif _smoke_mode == "stress" and _smoke_ticks >= 600:  # 10 c
 		_finish_smoke_stress()
+	elif _smoke_mode == "jam" and _smoke_ticks >= 900:  # 15 c
+		_finish_smoke_jam()
 
 
 func _finish_smoke_stack() -> void:
@@ -402,6 +413,23 @@ func _finish_smoke_pusher() -> void:
 	get_tree().quit(0 if ok else 1)
 
 
+func _finish_smoke_jam() -> void:
+	_smoke_mode = ""
+	var dups := _pool.size() - _count_unique(_pool)
+	var books_ok := score + active_coins() == 240 and _pool.size() == POOL_SIZE - active_coins()
+	var ok := dups == 0 and books_ok and score >= 40
+	print("SMOKE %s: score=%d active=%d pool=%d dups=%d" %
+		["OK" if ok else "FAIL", score, active_coins(), _pool.size(), dups])
+	get_tree().quit(0 if ok else 1)
+
+
+func _count_unique(arr: Array) -> int:
+	var seen := {}
+	for x in arr:
+		seen[x] = true
+	return seen.size()
+
+
 func _finish_smoke_stress() -> void:
 	_smoke_mode = ""
 	var avg_ms := 1000.0 * _phys_time_accum / 600.0
@@ -426,6 +454,8 @@ func _take_shot() -> void:
 		abs_path = ProjectSettings.globalize_path("res://").path_join(_shot_path)
 	DirAccess.make_dir_recursive_absolute(abs_path.get_base_dir())
 	var err := img.save_png(abs_path)
-	print("SHOT %s -> %s" % [("OK" if err == OK else "FAIL %d" % err), abs_path])
+	print("SHOT %s -> %s | score=%d active=%d pool=%d" %
+		[("OK" if err == OK else "FAIL %d" % err), abs_path,
+		score, active_coins(), _pool.size()])
 	_shot_path = ""
 	get_tree().quit(0 if err == OK else 1)
