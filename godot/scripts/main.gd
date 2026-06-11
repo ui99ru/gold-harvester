@@ -5,7 +5,7 @@ extends Node3D
 # --- Геометрия лотка (монета r=0.40, см. coin.gd) ---
 const TRAY_TILT_DEG := 6.0   # наклон к обрыву (+z вниз)
 const TRAY_W := 9.0          # внутренняя ширина
-const TRAY_L := 12.0         # длина дна
+const TRAY_L := 9.0          # длина дна (короткий: волна от толкателя доходит до обрыва)
 const WALL_H := 1.2
 const WALL_T := 0.4
 const FLOOR_T := 0.5
@@ -16,13 +16,18 @@ const GROUND_COLOR := Color("9c8fc0")
 const TRAY_COLOR := Color("4a4466")
 
 const COIN_SCENE := preload("res://scenes/coin.tscn")
+const PUSHER_SCENE := preload("res://scenes/pusher.tscn")
 const SPAWN_HEIGHT := 3.0    # глобальная высота плоскости спавна по тапу
 const AUDIO_POOL_SIZE := 8
 const CLINK_MIN_INTERVAL_MS := 50
+const KILL_Y := -6.0         # ниже — монета потеряна, возврат без счёта
 
 var tray: Node3D
 var coins_root: Node3D
 var camera: Camera3D
+var score := 0
+
+var _score_label: Label
 
 var _audio_players: Array[AudioStreamPlayer3D] = []
 var _clink_streams: Array[AudioStream] = []
@@ -38,8 +43,11 @@ var _smoke_ticks := 0
 func _ready() -> void:
 	_build_environment()
 	_build_tray()
+	_build_pusher()
+	_build_collect_zone()
 	_build_camera()
 	_build_audio()
+	_build_score_ui()
 	coins_root = Node3D.new()
 	coins_root.name = "Coins"
 	add_child(coins_root)
@@ -100,9 +108,55 @@ func _build_tray() -> void:
 		_add_box(body, Vector3(WALL_T, WALL_H, TRAY_L),
 			Vector3(side * (half_w + WALL_T / 2.0), WALL_H / 2.0, 0), mat)
 	# Задняя стенка (дальняя от обрыва, z = -half_l)
-	_add_box(body, Vector3(TRAY_W + 2.0 * WALL_T, WALL_H, WALL_T),
-		Vector3(0, WALL_H / 2.0, -(half_l - WALL_T / 2.0)), mat)
+	_add_box(body, Vector3(TRAY_W + 2.0 * WALL_T, WALL_H * 2.2, WALL_T),
+		Vector3(0, WALL_H * 1.1, -(half_l - WALL_T / 2.0)), mat)
+	# «Капот»-скребок над толкателем: монеты, упавшие на его крышу, при отходе
+	# толкателя упираются в кромку капота и ссыпаются на дно в зону подметания.
+	# Низ капота 1.05 — чуть выше крыши толкателя (1.0), он скользит под капотом.
+	var hood_z_from := -half_l
+	var hood_z_to := -1.85
+	_add_box(body, Vector3(TRAY_W, 0.55, hood_z_to - hood_z_from),
+		Vector3(0, 1.05 + 0.275, (hood_z_from + hood_z_to) / 2.0), mat)
 	# Передний край (z = +half_l) открыт — обрыв, зона сбора ниже (этап 3)
+
+
+func _build_pusher() -> void:
+	# В локальном (наклонном) пространстве лотка: скользит по дну у задней стенки
+	# Ход фронта: z ∈ [-2.1, +1.5]; в крайнем заднем положении тыл вплотную к стенке
+	var pusher := PUSHER_SCENE.instantiate()
+	pusher.position = Vector3(0, 0.5, -1.3)
+	tray.add_child(pusher)
+
+
+func _build_collect_zone() -> void:
+	# Под обрывом переднего края (глобальные координаты)
+	var area := Area3D.new()
+	area.name = "CollectZone"
+	var cs := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(14.0, 2.0, 5.0)
+	cs.shape = box
+	area.add_child(cs)
+	area.position = Vector3(0, -2.5, 6.3)
+	area.body_entered.connect(_on_coin_collected)
+	add_child(area)
+
+
+func _build_score_ui() -> void:
+	var layer := CanvasLayer.new()
+	add_child(layer)
+	_score_label = Label.new()
+	_score_label.position = Vector2(24, 16)
+	_score_label.add_theme_font_size_override("font_size", 36)
+	_score_label.text = "0"
+	layer.add_child(_score_label)
+
+
+func _on_coin_collected(body: Node3D) -> void:
+	if body is RigidBody3D:
+		score += 1
+		_score_label.text = str(score)
+		body.queue_free()
 
 
 func _build_camera() -> void:
@@ -150,7 +204,8 @@ func _spawn_at_tap(screen_pos: Vector2) -> void:
 	var t := (SPAWN_HEIGHT - origin.y) / dir.y
 	var hit := origin + dir * t
 	hit.x = clampf(hit.x, -TRAY_W / 2.0 + 0.5, TRAY_W / 2.0 - 0.5)
-	hit.z = clampf(hit.z, -TRAY_L / 2.0 + 0.6, TRAY_L / 2.0 - 0.2)
+	# Не спавнить в щель за толкателем — там монеты зажимает между ним и стенкой
+	hit.z = clampf(hit.z, -1.0, TRAY_L / 2.0 - 0.2)
 	spawn_coin(hit)
 
 
@@ -213,28 +268,43 @@ func _parse_user_args() -> void:
 			# 50 монет для визуальной проверки (вместе с --shot)
 			_shot_frames_left = 150
 			for i in 50:
-				spawn_coin(Vector3(randf_range(-3, 3), 1.0 + (i % 5) * 0.3,
-					randf_range(-3, 1)))
+				spawn_coin(Vector3(randf_range(-3, 3), 1.6 + (i % 5) * 0.3,
+					randf_range(-1.0, 4.0)))
 		elif arg.begins_with("--smoke-"):
 			_smoke_mode = arg.trim_prefix("--smoke-")
+			seed(20260611)  # детерминированный прогон
 			# НЕ ускорять Engine.time_scale: он растягивает эффективный шаг
 			# физики, и монеты туннелируют сквозь дно. Смоук идёт в реальном времени.
 
 	if _smoke_mode == "stack":
-		# 10 столбиков по 5 монет — проверка стэкинга
+		# 10 столбиков по 5 монет — чистый тест стэкинга, толкатель убираем
+		tray.get_node("Pusher").queue_free()
 		for col in 10:
 			var x := -3.0 + 1.5 * (col % 5)
-			var z := -3.0 + 2.5 * floorf(col / 5.0)
+			var z := 1.0 + 1.5 * floorf(col / 5.0)
 			for row in 5:
 				spawn_coin(Vector3(x, 1.0 + row * 0.25, z), false)
+	elif _smoke_mode == "pusher":
+		# Плотный слой перед толкателем — за 30 с волна должна дойти до зоны сбора
+		for i in 120:
+			spawn_coin(Vector3(randf_range(-3.8, 3.8),
+				1.6 + 0.3 * (i % 4), randf_range(-1.0, 4.2)))
 
 
 func _physics_process(_delta: float) -> void:
+	# Сметание потеряшек: ниже KILL_Y и мимо зоны сбора
+	if Engine.get_physics_frames() % 30 == 0 and coins_root != null:
+		for coin in coins_root.get_children():
+			if coin.global_position.y < KILL_Y:
+				coin.queue_free()
+
 	if _smoke_mode == "":
 		return
 	_smoke_ticks += 1
 	if _smoke_mode == "stack" and _smoke_ticks >= 360:  # 6 c симуляции
 		_finish_smoke_stack()
+	elif _smoke_mode == "pusher" and _smoke_ticks >= 1800:  # 30 c
+		_finish_smoke_pusher()
 
 
 func _finish_smoke_stack() -> void:
@@ -251,6 +321,15 @@ func _finish_smoke_stack() -> void:
 	var ok := total == 50 and fallen == 0 and asleep >= total * 0.9
 	print("SMOKE %s: coins=%d asleep=%d fallen=%d" %
 		["OK" if ok else "FAIL", total, asleep, fallen])
+	get_tree().quit(0 if ok else 1)
+
+
+func _finish_smoke_pusher() -> void:
+	_smoke_mode = ""
+	var remaining := coins_root.get_child_count()
+	var ok := score > 0 and score + remaining <= 120
+	print("SMOKE %s: score=%d remaining=%d" %
+		["OK" if ok else "FAIL", score, remaining])
 	get_tree().quit(0 if ok else 1)
 
 
