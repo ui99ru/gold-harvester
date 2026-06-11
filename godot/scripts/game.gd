@@ -67,6 +67,7 @@ var _script_target := Vector3.INF   # сценарная цель (смоуки;
 var _smoke_mode := ""
 var _smoke_ticks := 0
 var _smoke_violations := 0
+var _phys_accum := 0.0
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
 var _cal_sun := 1.0
@@ -724,6 +725,18 @@ func _setup_smoke() -> void:
 		for i in 8:
 			var c := pool.spawn(Vector3(8.6 + 0.4 * (i % 3), 0.3 + 0.2 * floorf(i / 3.0), 29.7), false)
 			c.worth = 5
+	elif _smoke_mode == "stress":
+		# Worst-case: весь пул 1000 по коридору, дозер месит кучу —
+		# замер физики + прокси телефона (×8) против бюджета 16.7 мс
+		var n := 0
+		while pool.free_count() > 0:
+			var c := pool.spawn(Vector3.ZERO, false)
+			c.position = Vector3(
+				-2.2 + 0.55 * (n % 9),
+				0.1 + 0.3 * floorf(n / 99.0),
+				6.0 + 0.45 * (floori(n / 9.0) % 11))
+			n += 1
+		_script_target = Vector3(0, 0, 16)
 	elif _smoke_mode == "wave":
 		# Ворота-1 принудительно открыты; монета worth=1 катится сквозь.
 		# Инвариант: сумма worth активных монет после волны ровно x10.
@@ -766,6 +779,15 @@ func _smoke_tick() -> void:
 			var ok: bool = g.active and bank >= 10.0 and books
 			print("SMOKE %s: gate1_active=%s fill=%.0f bank=%.0f active=%d books=%s" %
 				["OK" if ok else "FAIL", g.active, g.fill, bank, pool.active_count(), books])
+			get_tree().quit(0 if ok else 1)
+	elif _smoke_mode == "stress":
+		_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+		if _smoke_ticks >= 600:  # 10 c
+			var avg_ms := 1000.0 * _phys_accum / 600.0
+			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			var ok := books and pool.active_count() > 900
+			print("SMOKE %s: avg_physics=%.2f ms (≈телефон %.1f ms) active=%d books=%s" %
+				["OK" if ok else "FAIL", avg_ms, avg_ms * 8.0, pool.active_count(), books])
 			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "knife":
 		if _smoke_ticks >= 240:  # 4 c

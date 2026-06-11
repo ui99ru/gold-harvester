@@ -1,57 +1,72 @@
-# Золотодозер — нативный прототип (Godot 4.4.1 + Jolt)
+# Золотодозер — Godot 4.4.1 + Jolt
 
-Вертикальный срез по [docs/brief-zolotodozer-godot.md](../docs/brief-zolotodozer-godot.md):
-coin pusher с физикой монет, перенесённой из Three.js-версии (корень репо).
-Цель — замерить отзывчивость и производительность нативного стека на Android
-против браузерной версии.
+Полный порт браузерной игры (Three.js + Rapier, корень репо) — «все ценности,
+от осей и камеры до вида монет и работы с воротами». Источник истины — `src/`;
+палитра и свет откалиброваны по web-эталону численно (`tools/sample_patch.py`).
+Петля разработки — десктоп; телефон — чекпойнты APK (CI собирает каждый пуш).
 
-## Архитектура
+## Сцены
 
-Сцены (`scenes/*.tscn`) — один корневой узел + скрипт; вся геометрия, материалы
-и UI строятся кодом в `scripts/*.gd`. Это позволяет работать с проектом без
-редактора Godot.
+- `scenes/game.tscn` — **игра** (main_scene): коридор, дозер, ворота ×10/×100
+  с волнами, пад НОЖ, трэш-пэд, экономика, звук, джус.
+- `scenes/pusher_lab.tscn` — лоток-полигон (тест физики монет, не игра).
+
+Сцены минимальны (корень + скрипт); вся геометрия, материалы, текстуры и UI
+строятся кодом — проект живёт без редактора Godot.
+
+## Скрипты
 
 | Скрипт | Роль |
 | --- | --- |
-| `main.gd` | сцена, лоток, пул 250 монет, тап-спавн, зона сбора, смоук-тесты |
-| `coin.gd` | RigidBody3D: r=0.40, h=0.085, friction 0.95, damp 0.8/0.9, клэмп 12 м/с |
-| `pusher.gd` | AnimatableBody3D, синусоида (период 2.5 с, амплитуда 1.8) |
-| `performance_hud.gd` | FPS, frame/physics ms, активные тела, пул, кнопка «+50», тумблеры тюнинга |
+| `game.gd` | оркестратор: сим-шаг (порядок web simStep), ввод (драг+WASD), камера-формулы web, экономика, банк, смоук-харнесс |
+| `game_config.gd` | ВСЕ константы src/config.js 1:1 (физика/камера/палитра/экономика) |
+| `level_def.gd` / `entity_def.gd` | уровень = данные; `levels/level_01.tres` — web-карта |
+| `dozer.gd` | ~30-деталь миниатюра + кинематика: ковш 8 коллайдеров, шасси 2 (top_level + явные позы) |
+| `gates.gd` | ворота: накопление/разблок (web :439-449) и волна ×mult (web :408-438, эдж-триггер) |
+| `pads.gd` / `trash_pad.gd` | пад НОЖ (апгрейд ковша) / утилизатор |
+| `coin.gd` | физика 1:1 (r 0.40, friction 0.95, клэмп 12), атлас-грань со звездой, «завал плашмя» |
+| `coin_pool.gd` | пул 1000: spawn/release, неактивные заморожены и без коллизий |
+| `fx.gd` | 80 спрайтов (пыль/искры/всполохи) + попапы; `game_audio.gd` — движок-луп/джинглы/mute |
+| `tex_gen.gd` | процедурные текстуры: грунт, монета, шеврон, небо (детерминированы) |
+| `performance_hud.gd` | FPS/physics ms, прокси «≈телефон» (×8), тумблеры тюнинга |
 
-Физика: Jolt, gravity 30 (3×), 60 тиков/с, velocity_steps 8.
-Над толкателем — статический «капот»-скребок: монеты с его крыши ссыпаются на
-дно при отходе (без него куча не двигалась — монеты катались на толкателе).
-
-## Запуск на десктопе
+## Запуск
 
 ```powershell
 $GODOT = "C:\Tools\Godot-4.4.1\Godot_v4.4.1-stable_win64_console.exe"
-& $GODOT --path godot
+& $GODOT --path godot            # игра: СТАРТ -> драг по земле / WASD, колесо = зум
 ```
-
-Мышь эмулирует тап (`emulate_touch_from_mouse`). Тап — монета над точкой.
 
 ### Смоук-тесты (headless, детерминированные, exit code)
 
-Лоток-полигон (`scenes/pusher_lab.tscn` — тест-сцена физики, не игра):
+Игра (main_scene):
 
 ```powershell
-$LAB = "res://scenes/pusher_lab.tscn"
-& $GODOT --headless --path godot $LAB ++ --smoke-stack    # стэкинг 50 монет, 6 c
-& $GODOT --headless --path godot $LAB ++ --smoke-pusher   # толкатель довозит до сбора, 30 c
-& $GODOT --headless --path godot $LAB ++ --smoke-stress   # весь пул 250, замер физики, 10 c
-& $GODOT --headless --path godot $LAB ++ --smoke-jam      # затор 240 монет, излишек сваливается, 15 c
+& $GODOT --headless --path godot ++ --smoke-drive     # таран столба + проезд в створ, 20 c
+& $GODOT --headless --path godot ++ --smoke-push      # наезд на кучу: нет туннеля/провала, 10 c
+& $GODOT --headless --path godot ++ --smoke-gatefill  # монеты в мат -> разблок ворот, 15 c
+& $GODOT --headless --path godot ++ --smoke-wave      # инвариант волны: сумма worth ровно x10, 6 c
+& $GODOT --headless --path godot ++ --smoke-knife     # апгрейд НОЖ: ковш шире, пад исчез, 4 c
+& $GODOT --headless --path godot ++ --smoke-trash     # сжигание без банка, пул сходится, 4 c
+& $GODOT --headless --path godot ++ --smoke-stress    # worst-case 1000 тел: замер физики, 10 c
 ```
 
-### Скриншоты
+Лоток (`$LAB = "res://scenes/pusher_lab.tscn"`): `--smoke-stack | pusher | stress | jam`.
+
+### Скриншоты и сверка с web
 
 ```powershell
-& $GODOT --path godot $LAB ++ --shot=out/shot.png              # пустая сцена
-& $GODOT --path godot $LAB ++ --drop-demo --shot=out/demo.png  # 50 монет + кадр
+& $GODOT --path godot ++ --pose=0,14 --shot=out/x.png   # кадр в позе web-бита
+npm run shoot                                            # web-эталоны (out/shot_*.png)
+python tools\sample_patch.py out\shot_establish.png 520 980 680 1140   # замер патча
 ```
 
-Известная грабля: `Engine.time_scale` растягивает эффективный шаг физики —
-монеты туннелируют сквозь дно. Смоуки идут в реальном времени.
+Известные грабли:
+
+- `Engine.time_scale` растягивает шаг физики — монеты туннелируют. Смоуки в реальном времени.
+- AnimatableBody3D-ребёнок движущегося узла НЕ синкается с физикой — тела
+  кинематики top_level с явными позами каждый тик.
+- `PHYSICS_3D_ACTIVE_OBJECTS` на Jolt всегда 0 — не верить.
 
 ## Локальная сборка APK
 
@@ -81,23 +96,19 @@ Android-экспорт падает с **пустым** списком configura
 
 ## CI
 
-`.github/workflows/build-android.yml`: пуш тега `v*` (или workflow_dispatch из
-default-ветки) → образ `barichello/godot-ci:4.4.1` → debug APK в артефакте
-`zolotodozer-debug-apk`. Секретов нет — debug keystore из образа/keytool.
-Release-подпись (база на будущее): keystore в base64 → Secrets
-(`ANDROID_KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`), декодировать в шаге,
-путь через `GODOT_ANDROID_KEYSTORE_RELEASE_PATH` и т.п.
+`.github/workflows/build-android.yml`: пуш в `xp/godot` или тег `v*` →
+`barichello/godot-ci:4.4.1` → debug APK в артефакте `zolotodozer-debug-apk`.
+Секретов нет. Release-подпись потом: keystore base64 → Secrets.
 
-## Замеры
+## Замеры (прокси: десктоп-физика ×8 ≈ телефон; бюджет кадра 16.7 мс)
 
-| Сценарий | Платформа | Результат |
-| --- | --- | --- |
-| smoke-stress: 250 монет, 10 с | Desktop (Ryzen/RTX 3060) | avg physics **1.75 мс** |
-| 242 монеты, куча у обрыва | Телефон пользователя | FPS 39, frame 27.0 мс, physics 13.3 мс |
+| Сценарий | Desktop physics | ≈Телефон | Факт телефона |
+| --- | --- | --- | --- |
+| Лоток 250 монет | 1.7 мс | 13.9 мс | 13.3 мс (валидация прокси) |
+| Игра, worst-case 1000 бодрствующих | 16.6 мс | 132 мс | — |
 
-Тюнинг (бриф §7) — тумблеры в HUD, по одному, замер на устройстве:
-тени / тики 60→50 / MSAA 2x / звон+контакты (contact_monitor).
-`active bodies 0` на Jolt — монитор не заполняется, не верить.
-Если после отключения теней рендер всё ещё дорог — следующий кандидат:
-MultiMesh вместо 250 MeshInstance3D (1 draw call, ручная синхронизация
-трансформов из физики).
+Вывод: спящие кучи почти бесплатны (Jolt), бюджет ≈ **250-300 одновременно
+активных** монет. При сценах масштаба 1000 активных нужен «активный пузырь»
+(см. memory/BACKLOG) — следующий этап тюнинга, триггер — покраснение строки
+«≈телефон» в HUD. Рендер прокси не покрывает: кандидат при дорогом рендере —
+MultiMesh вместо 1000 MeshInstance3D.
