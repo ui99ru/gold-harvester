@@ -27,6 +27,11 @@ pointing/emulate_touch_from_mouse=true
 3d/default_gravity=30.0
 common/physics_ticks_per_second=60
 jolt_physics_3d/simulation/velocity_steps=8
+jolt_physics_3d/limits/max_body_pairs=131072
+jolt_physics_3d/limits/max_contact_constraints=40960
+jolt_physics_3d/limits/temporary_memory_buffer_size=64
+jolt_physics_3d/simulation/sleep_velocity_threshold=0.5
+jolt_physics_3d/simulation/sleep_time_threshold=0.25
 
 [rendering]
 

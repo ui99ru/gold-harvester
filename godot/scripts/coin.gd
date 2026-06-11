@@ -12,6 +12,7 @@ const CLINK_V2 := 9.0                      # clinkV=3.0² — скольжени
 
 # Активный «завал» монеты с ребра (порт physics.js:129-136, пороги src/config.js:31-32)
 const CALM_V2 := 1.44                      # calmV 1.2²
+const CALM_FRAMES := 18                    # кадров деадзоны до сна
 const CALM_W2 := 36.0                      # calmW 6.0²
 const CALM_VY := 0.4
 const CALM_FLAT := 0.45
@@ -19,8 +20,6 @@ const CALM_FLAT_G := 0.75
 const CALM_GROUND_Y := 0.6
 const FLATTEN_K := 8.0
 
-## Принудительный сон деадзоны (web calmFrames) НЕ портирован: у Jolt свой sleep,
-## в лотке кучи засыпают штатно. Завал — наблюдаемое поведение, оставлен.
 @export var calm_flatten := true
 
 var idx := -1                              # стабильный индекс в пуле (side-массивы ворот)
@@ -102,8 +101,11 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 				clink_cb.call(global_position, clampf(imp / (CLINK_IMPULSE * 6.0), 0.15, 1.0))
 				break
 
-	# Активный «завал» с ребра: почти неподвижная монета на ребре получает
-	# угловую скорость к плашмя (up × Y). Web: physics.js:134-135.
+	# Активный «завал» с ребра (web physics.js:134-135). Принудительный сон
+	# web (обнуление + sleep) НЕ портирован: обнуление скоростей каждый тик
+	# сбрасывает таймер сна Jolt и ломает островной сон (куча перестаёт
+	# засыпать вовсе). Вместо него — агрессивные sleep-пороги Jolt в
+	# project.godot (sleep_velocity_threshold/time_threshold).
 	if calm_flatten and s < CALM_V2 and absf(v.y) < CALM_VY \
 			and state.angular_velocity.length_squared() < CALM_W2:
 		var up := state.transform.basis.y                # ось монеты R·(0,1,0)
