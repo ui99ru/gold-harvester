@@ -1,3 +1,4 @@
+class_name Game
 extends Node3D
 ## Игра «Золотодозер»: оркестратор. Порт src/main.js на Godot.
 ## Порядок сим-шага повторяет web simStep: ввод → дозер → кинематик-позы →
@@ -36,6 +37,8 @@ var pool: CoinPool
 var clinks: ClinkAudio
 var fx: Fx
 var gates: Array[Gate] = []
+var pads: Array[UpgradePad] = []
+var trash_pads: Array[TrashPad] = []
 
 # Сущности (ворота, этап 6) сбрасывают side-регистрацию телепортированной монеты
 var side_resetters: Array[Callable] = []
@@ -133,7 +136,16 @@ func _build_entities() -> void:
 				gt.setup(self, e)
 				add_child(gt)
 				gates.append(gt)
-			# pad_knife / trash — этап 7
+			"pad_knife":
+				var pd := UpgradePad.new()
+				pd.setup(self, e)
+				add_child(pd)
+				pads.append(pd)
+			"trash":
+				var tp := TrashPad.new()
+				tp.setup(self, e)
+				add_child(tp)
+				trash_pads.append(tp)
 
 
 func _build_bank_ui() -> void:
@@ -188,6 +200,16 @@ func on_gate_unlocked(g: Gate) -> void:
 	shake += 0.3
 	fx.sparks(g.position.x, g.position.z, 22)
 	fx.popup(Vector3(g.position.x, 3, g.position.z), "ОТКРЫТО x%d" % g.mult, Color("aef0c0"))
+	# chime('upgrade') — этап 8
+
+
+func on_pad_upgraded(pd: UpgradePad) -> void:
+	# Апгрейд НОЖ: шире ковш (web apply, main.js:253)
+	up_blade_half += 0.5
+	dozer.rebuild_blade(dozer.blade_hx())
+	pads.erase(pd)
+	shake += 0.34
+	fx.sparks(pd.position.x, pd.position.z, 22)
 	# chime('upgrade') — этап 8
 
 
@@ -521,6 +543,10 @@ func sim_step(dt: float) -> void:
 	# Экономика (web stepEconomy; физика монет шагает движком после)
 	for gt in gates:
 		gt.step(dt)
+	for pd in pads:
+		pd.step(dt)
+	for tp in trash_pads:
+		tp.step(dt)
 	_update_bank_ui()
 
 
@@ -571,6 +597,7 @@ func _setup_smoke() -> void:
 	elif _smoke_mode == "push":
 		# Плотная куча на пути — дозер прёт сквозь на полной скорости.
 		# Ассерты: ничего не туннелировало в корпус, не провалилось, сгребается.
+		# Маршрут заканчивается ДО мата ворот (z<16.7) — чистый тест сгребания.
 		for i in 40:
 			pool.spawn(Vector3.ZERO, false)
 		var n := 0
@@ -580,9 +607,9 @@ func _setup_smoke() -> void:
 			coin.position = Vector3(
 				-1.5 + 0.75 * (n % 5),
 				0.1 + 0.15 * floorf(n / 20.0),
-				11.0 + 0.8 * (floori(n / 5.0) % 4))
+				8.0 + 0.8 * (floori(n / 5.0) % 4))
 			n += 1
-		_script_target = Vector3(0, 0, 20)
+		_script_target = Vector3(0, 0, 13.5)
 	elif _smoke_mode == "gatefill":
 		# 12 монет узкой кучей (в ширину ковша) перед матом ворот-1 —
 		# дозер вталкивает, fill>=10 -> разблок
@@ -590,6 +617,16 @@ func _setup_smoke() -> void:
 			pool.spawn(Vector3(-0.6 + 0.6 * (i % 3), 0.1, 15.4 + 0.55 * floorf(i / 3.0)), false)
 		dozer.position = Vector3(0, 0, 12)
 		_script_target = Vector3(0, 0, 19.5)
+	elif _smoke_mode == "knife":
+		# 12 монет worth=10 прямо в зоне пада (итого 120 = cost) -> апгрейд
+		for i in 12:
+			var c := pool.spawn(Vector3(-9.6 + 0.6 * (i % 3), 0.3 + 0.2 * floorf(i / 3.0), 29.5), false)
+			c.worth = 10
+	elif _smoke_mode == "trash":
+		# 8 монет worth=5 в зоне трэша -> сгорают: банк 0, пул сходится
+		for i in 8:
+			var c := pool.spawn(Vector3(8.6 + 0.4 * (i % 3), 0.3 + 0.2 * floorf(i / 3.0), 29.7), false)
+			c.worth = 5
 	elif _smoke_mode == "wave":
 		# Ворота-1 принудительно открыты; монета worth=1 катится сквозь.
 		# Инвариант: сумма worth активных монет после волны ровно x10.
@@ -633,6 +670,27 @@ func _smoke_tick() -> void:
 			print("SMOKE %s: gate1_active=%s fill=%.0f bank=%.0f active=%d books=%s" %
 				["OK" if ok else "FAIL", g.active, g.fill, bank, pool.active_count(), books])
 			get_tree().quit(0 if ok else 1)
+	elif _smoke_mode == "knife":
+		if _smoke_ticks >= 240:  # 4 c
+			var bh_ok := absf(up_blade_half - 2.1) < 0.001
+			var pad_gone := pads.is_empty()
+			var stand_gone := true
+			for o in obstacles:
+				if not o.post:
+					stand_gone = false
+			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			var ok := bh_ok and pad_gone and stand_gone and books and bank >= 120.0
+			print("SMOKE %s: blade_half=%.1f pad_gone=%s stand_gone=%s bank=%.0f books=%s" %
+				["OK" if ok else "FAIL", up_blade_half, pad_gone, stand_gone, bank, books])
+			get_tree().quit(0 if ok else 1)
+	elif _smoke_mode == "trash":
+		if _smoke_ticks >= 240:  # 4 c
+			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			# 8 сгорели без банка; активны только 5 стартовых у источника
+			var ok := bank == 0.0 and pool.active_count() == 5 and books
+			print("SMOKE %s: bank=%.0f active=%d books=%s" %
+				["OK" if ok else "FAIL", bank, pool.active_count(), books])
+			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "wave":
 		if _smoke_ticks >= 360:  # 6 c: волна + парковка в створе (анти-фарм)
 			var total_worth := 0
@@ -659,7 +717,7 @@ func _smoke_tick() -> void:
 				var p: Vector3 = coin.global_position
 				if p.y < -0.5:
 					fallen += 1
-				if p.z > 14.5:
+				if p.z > 11.5:
 					plowed += 1
 				var lp: Vector3 = inv * p  # локальные координаты дозера
 				if absf(lp.x) < 0.8 and lp.z > -1.2 and lp.z < 1.2 and lp.y < 2.0:
