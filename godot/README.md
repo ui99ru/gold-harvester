@@ -33,17 +33,21 @@ $GODOT = "C:\Tools\Godot-4.4.1\Godot_v4.4.1-stable_win64_console.exe"
 
 ### Смоук-тесты (headless, детерминированные, exit code)
 
+Лоток-полигон (`scenes/pusher_lab.tscn` — тест-сцена физики, не игра):
+
 ```powershell
-& $GODOT --headless --path godot ++ --smoke-stack    # стэкинг 50 монет, 6 c
-& $GODOT --headless --path godot ++ --smoke-pusher   # толкатель довозит до сбора, 30 c
-& $GODOT --headless --path godot ++ --smoke-stress   # весь пул 250, замер физики, 10 c
+$LAB = "res://scenes/pusher_lab.tscn"
+& $GODOT --headless --path godot $LAB ++ --smoke-stack    # стэкинг 50 монет, 6 c
+& $GODOT --headless --path godot $LAB ++ --smoke-pusher   # толкатель довозит до сбора, 30 c
+& $GODOT --headless --path godot $LAB ++ --smoke-stress   # весь пул 250, замер физики, 10 c
+& $GODOT --headless --path godot $LAB ++ --smoke-jam      # затор 240 монет, излишек сваливается, 15 c
 ```
 
 ### Скриншоты
 
 ```powershell
-& $GODOT --path godot ++ --shot=out/shot.png              # пустая сцена
-& $GODOT --path godot ++ --drop-demo --shot=out/demo.png  # 50 монет + кадр
+& $GODOT --path godot $LAB ++ --shot=out/shot.png              # пустая сцена
+& $GODOT --path godot $LAB ++ --drop-demo --shot=out/demo.png  # 50 монет + кадр
 ```
 
 Известная грабля: `Engine.time_scale` растягивает эффективный шаг физики —
