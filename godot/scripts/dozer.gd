@@ -151,18 +151,21 @@ func _build_bodies(hx: float) -> void:
 	chassis_body.top_level = true
 	chassis_body.physics_material_override = pm2
 	add_child(chassis_body)
+	# web main.js:303: фронт-низ (стык до ковша) + короб-высокий. ОДИН раз при
+	# постройке — НЕ в update_body_poses (та зовётся каждый физ-тик и копила бы
+	# по 2 коллайдера/тик → тысячи фантомов на шасси → монотонный фриз).
+	_add_shape(chassis_body, Vector3(2.0, 1.0, 1.0), Vector3(0, 0.5, 0.5), 0.0)
+	_add_shape(chassis_body, Vector3(1.7, 2.4, 1.8), Vector3(0, 1.2, 0), 0.0)
 	update_body_poses()
 
 
 func update_body_poses() -> void:
 	# Порт web setKinematicPoses (main.js:385-391): ковш на выносе BLADE_FWD,
-	# шасси в основании; только yaw + высота (groundLift/бобинг в position.y)
+	# шасси в основании; только yaw + высота (groundLift/бобинг в position.y).
+	# ТОЛЬКО позы — никакого создания узлов (горячий путь, каждый физ-тик).
 	var t := global_transform
 	blade_body.global_transform = t * Transform3D(Basis(), Vector3(0, 0, BLADE_FWD))
 	chassis_body.global_transform = t
-	# web main.js:303: фронт-низ (стык до ковша) + короб-высокий
-	_add_shape(chassis_body, Vector3(2.0, 1.0, 1.0), Vector3(0, 0.5, 0.5), 0.0)
-	_add_shape(chassis_body, Vector3(1.7, 2.4, 1.8), Vector3(0, 1.2, 0), 0.0)
 
 
 func _build_blade_shapes(hx: float) -> void:

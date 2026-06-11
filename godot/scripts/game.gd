@@ -68,6 +68,12 @@ var _smoke_mode := ""
 var _smoke_ticks := 0
 var _smoke_violations := 0
 var _phys_accum := 0.0
+var _phys_max := 0.0
+var _active_prev := 0
+var _max_spawn_burst := 0
+var _loop_dir := 1
+var _loop_laps := 0
+var _loop_nodes0 := 0
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
 var _cal_sun := 1.0
@@ -763,6 +769,46 @@ func _setup_smoke() -> void:
 		var c := pool.spawn(Vector3(0, 0.15, 18.6), false)
 		c.linear_velocity = Vector3(0, 0, 12.0)  # трение тормозит ~28 м/с²
 		dozer.position = Vector3(0, 0, 5)  # дозер в стороне от створа
+	elif _smoke_mode == "spike":
+		# Замер ПИКА (фриз), не среднего: дозер проталкивает кучу сквозь
+		# открытые ворота-2 ×100 — реальный триггер каскада. Каждая пересёкшая
+		# монета плодит до 9 копий; при mult=100 поток копий из свободного пула
+		# огромен. Ищем max single-tick ms и всплеск спавнов/тик.
+		for coin in pool.get_children():
+			if not coin.freeze:
+				pool.release(coin)
+		gates[1].active = true  # ворота-2 z=40, mult=100
+		for row in 10:
+			for lane in 7:
+				var cc := pool.spawn(Vector3(
+					-2.55 + 0.85 * lane, 0.15, 38.6 - 0.7 * row), false)
+				cc.worth = 2
+		dozer.position = Vector3(0, 0, 31)  # позади кучи, толкает к воротам
+		_script_target = Vector3(0, 0, 45)
+	elif _smoke_mode == "loop":
+		# Реалистичный игровой цикл (точно по ТЗ пользователя): дозер-челнок
+		# гоняет по всему коридору через обе ворота. 5 стартовых монет × 2
+		# прохода -> fill ворот-1 = 10 -> разблок. Дальше умножение ×10 копит
+		# до ворот-2 (cost 600) -> разблок ×100. Потом круги с максимумом.
+		# Стартовые 5 монет уже заспавнены в _ready. Дозер у источника.
+		# Мягче скорость: монеты не разлетаются к краям, стопаются в зоне мата.
+		up_move = 6.0
+		dozer.position = Vector3(0, 0, 6)
+		_loop_dir = 1
+		_script_target = Vector3(0, 0, 18)
+	elif _smoke_mode == "freeze":
+		# Прямой тест механизма фриза: 800 монет ПЛОТНО внахлёст (шаг 0.3 <<
+		# 2·radius=0.8) в малом объёме -> глубокое проникновение -> взрыв
+		# контактов. Проверяем: пробивает ли буфер 40960 -> fallback-аллокатор
+		# Jolt (hard-столл) и какой при этом пик тика.
+		var n := 0
+		for i in 800:
+			var cc := pool.spawn(Vector3(
+				-1.2 + 0.3 * (n % 9),
+				0.1 + 0.3 * floorf(n / 90.0),
+				8.0 + 0.3 * (floori(n / 9.0) % 10)), false)
+			n += 1
+		dozer.position = Vector3(20, 0, 30)  # дозер далеко, не мешает
 	elif _smoke_mode == "bucket":
 		# Чистое репро лага «монеты в ковше» (БЕЗ ворот): куча у источника,
 		# дозер возит её челноком в зоне z∈[4,14], не доезжая до мата ворот
@@ -779,10 +825,75 @@ func _setup_smoke() -> void:
 		_script_target = Vector3(0, 0, 13)
 
 
+func _descendants(n: Node) -> int:
+	var c := n.get_child_count()
+	for ch in n.get_children():
+		c += _descendants(ch)
+	return c
+
+
 func _smoke_tick() -> void:
 	if _smoke_mode == "":
 		return
 	_smoke_ticks += 1
+	# Пик физики: max времени ОДНОГО физ-тика = кандидат во фриз (не среднее)
+	var pm := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+	if pm > _phys_max:
+		_phys_max = pm
+	if _smoke_mode == "loop":
+		# Фазовый челнок: цель спереди зависит от прогресса. Фаза 1 (ворота-1
+		# заперты): толкаем монеты на мат ворот-1 (z18, стоп В зоне). Фаза 2
+		# (ворота-1 открыты): гоним сквозь них на мат ворот-2 (z38). Фаза 3
+		# (обе открыты): полный прогон до z45. Назад всегда к источнику (z6).
+		var fwd_z := 18.0
+		if gates[1].active:
+			fwd_z = 45.0
+		elif gates[0].active:
+			fwd_z = 38.0
+		# Змейка по x: ковш ~2 м, коридор 5.6 м — собираем монеты с краёв.
+		var weave := 1.9 * sin(_smoke_ticks * 0.06)
+		if _loop_dir == 1 and dozer.position.z > fwd_z - 1.5:
+			_loop_dir = -1
+			_script_target = Vector3(weave, 0, 6)
+		elif _loop_dir == -1 and dozer.position.z < 7.5:
+			_loop_dir = 1
+			_loop_laps += 1
+			_script_target = Vector3(weave, 0, fwd_z)
+		else:
+			_script_target = Vector3(weave, 0, 6.0 if _loop_dir == -1 else fwd_z)
+		# Засечь моменты разблокировки
+		# Регресс на утечку узлов (баг: создание коллайдеров в per-tick пути).
+		# Дозер непрерывно ездит ~60 c; число узлов и пик тика обязаны быть плоскими.
+		if _smoke_ticks == 120:
+			_loop_nodes0 = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
+			_phys_max = 0.0  # сбросить пик после стартового спайка спавна
+		if _smoke_ticks >= 3600:  # 60 c
+			var nodes_now := Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
+			var leaked := nodes_now - _loop_nodes0
+			# Допуск: пул/частицы могут колебаться на десятки; утечка была +2/тик (~7000)
+			var ok := leaked < 200 and _phys_max < 0.040
+			print("SMOKE loop: %s nodes_t120=%d nodes_end=%d leaked=%d peak_after_warmup=%.1f ms laps=%d" %
+				["OK" if ok else "FAIL", _loop_nodes0, nodes_now, leaked, 1000.0 * _phys_max, _loop_laps])
+			get_tree().quit(0 if ok else 1)
+		return
+	if _smoke_mode == "spike" or _smoke_mode == "freeze":
+		var act := pool.active_count()
+		var burst := act - _active_prev   # сколько монет добавлено за этот тик (спавн волны)
+		if burst > _max_spawn_burst:
+			_max_spawn_burst = burst
+		_active_prev = act
+		_phys_accum += pm
+		if _smoke_ticks % 20 == 0:
+			print("%s t=%d active=%d tick_ms=%.1f peak_ms=%.1f" %
+				[_smoke_mode, _smoke_ticks, act, 1000.0 * pm, 1000.0 * _phys_max])
+		if _smoke_ticks >= 300:  # 5 c
+			# Порог пика ловит регресс класса утечки (она гнала пик 20->66+ мс).
+			# spike (каскад) ~19 мс, freeze (плотный нахлёст) ~27 мс — кэп 60.
+			var ok := _phys_max < 0.060
+			print("SMOKE %s: %s PEAK_tick=%.1f ms avg=%.2f ms max_spawn_burst=%d active=%d" %
+				[_smoke_mode, "OK" if ok else "FAIL", 1000.0 * _phys_max,
+				1000.0 * _phys_accum / 300.0, _max_spawn_burst, pool.active_count()])
+			get_tree().quit(0 if ok else 1)
 	if _smoke_mode == "drive":
 		# Инвариант web: центр дозера никогда не ВНУТРИ AABB (сквозь столб
 		# не проходит). Клиренс < R транзиентно бывает и в web (двойное
