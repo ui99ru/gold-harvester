@@ -15,16 +15,34 @@ const BG_COLOR := Color("7c6cb2")
 const GROUND_COLOR := Color("9c8fc0")
 const TRAY_COLOR := Color("4a4466")
 
+const COIN_SCENE := preload("res://scenes/coin.tscn")
+const SPAWN_HEIGHT := 3.0    # глобальная высота плоскости спавна по тапу
+const AUDIO_POOL_SIZE := 8
+const CLINK_MIN_INTERVAL_MS := 50
+
 var tray: Node3D
+var coins_root: Node3D
+var camera: Camera3D
+
+var _audio_players: Array[AudioStreamPlayer3D] = []
+var _clink_streams: Array[AudioStream] = []
+var _audio_idx := 0
+var _last_clink_ms := 0
 
 var _shot_path := ""
 var _shot_frames_left := 0
+var _smoke_mode := ""
+var _smoke_ticks := 0
 
 
 func _ready() -> void:
 	_build_environment()
 	_build_tray()
 	_build_camera()
+	_build_audio()
+	coins_root = Node3D.new()
+	coins_root.name = "Coins"
+	add_child(coins_root)
 	_parse_user_args()
 
 
@@ -88,12 +106,66 @@ func _build_tray() -> void:
 
 
 func _build_camera() -> void:
-	var cam := Camera3D.new()
-	cam.name = "Camera"
-	cam.fov = 45.0
-	cam.position = Vector3(0, 13.0, 12.0)
-	cam.look_at_from_position(cam.position, Vector3(0, 0, 0.5), Vector3.UP)
-	add_child(cam)
+	camera = Camera3D.new()
+	camera.name = "Camera"
+	camera.fov = 45.0
+	camera.position = Vector3(0, 13.0, 12.0)
+	camera.look_at_from_position(camera.position, Vector3(0, 0, 0.5), Vector3.UP)
+	add_child(camera)
+
+
+func _build_audio() -> void:
+	for i in 4:
+		_clink_streams.append(load("res://assets/audio/clink_%d.wav" % (i + 1)))
+	for i in AUDIO_POOL_SIZE:
+		var p := AudioStreamPlayer3D.new()
+		p.max_polyphony = 1
+		add_child(p)
+		_audio_players.append(p)
+
+
+# --- Монеты ---
+
+func spawn_coin(pos: Vector3, random_tilt := true) -> RigidBody3D:
+	var coin: RigidBody3D = COIN_SCENE.instantiate()
+	coin.position = pos
+	if random_tilt:
+		coin.rotation = Vector3(
+			randf_range(-0.3, 0.3), randf_range(0, TAU), randf_range(-0.3, 0.3))
+	coin.clink_cb = _on_coin_clink
+	coins_root.add_child(coin)
+	return coin
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch and event.pressed:
+		_spawn_at_tap(event.position)
+
+
+func _spawn_at_tap(screen_pos: Vector2) -> void:
+	var origin := camera.project_ray_origin(screen_pos)
+	var dir := camera.project_ray_normal(screen_pos)
+	if dir.y >= -0.01:
+		return
+	var t := (SPAWN_HEIGHT - origin.y) / dir.y
+	var hit := origin + dir * t
+	hit.x = clampf(hit.x, -TRAY_W / 2.0 + 0.5, TRAY_W / 2.0 - 0.5)
+	hit.z = clampf(hit.z, -TRAY_L / 2.0 + 0.6, TRAY_L / 2.0 - 0.2)
+	spawn_coin(hit)
+
+
+func _on_coin_clink(pos: Vector3, strength: float) -> void:
+	var now := Time.get_ticks_msec()
+	if now - _last_clink_ms < CLINK_MIN_INTERVAL_MS:
+		return
+	_last_clink_ms = now
+	var p := _audio_players[_audio_idx]
+	_audio_idx = (_audio_idx + 1) % AUDIO_POOL_SIZE
+	p.stream = _clink_streams[randi() % _clink_streams.size()]
+	p.global_position = pos
+	p.pitch_scale = randf_range(0.9, 1.1)
+	p.volume_db = linear_to_db(clampf(strength, 0.15, 1.0))
+	p.play()
 
 
 # --- Утилиты ---
@@ -130,12 +202,56 @@ func _tray_phys_material() -> PhysicsMaterial:
 
 
 # --- Смоук-тесты и скриншоты (запуск: godot --path godot ++ --shot=out/x.png) ---
+# Headless: godot --headless --path godot ++ --smoke-stack
 
 func _parse_user_args() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--shot="):
 			_shot_path = arg.trim_prefix("--shot=")
-			_shot_frames_left = 20  # дать кадрам отрисоваться
+			_shot_frames_left = maxi(_shot_frames_left, 20)  # дать кадрам отрисоваться
+		elif arg == "--drop-demo":
+			# 50 монет для визуальной проверки (вместе с --shot)
+			_shot_frames_left = 150
+			for i in 50:
+				spawn_coin(Vector3(randf_range(-3, 3), 1.0 + (i % 5) * 0.3,
+					randf_range(-3, 1)))
+		elif arg.begins_with("--smoke-"):
+			_smoke_mode = arg.trim_prefix("--smoke-")
+			# НЕ ускорять Engine.time_scale: он растягивает эффективный шаг
+			# физики, и монеты туннелируют сквозь дно. Смоук идёт в реальном времени.
+
+	if _smoke_mode == "stack":
+		# 10 столбиков по 5 монет — проверка стэкинга
+		for col in 10:
+			var x := -3.0 + 1.5 * (col % 5)
+			var z := -3.0 + 2.5 * floorf(col / 5.0)
+			for row in 5:
+				spawn_coin(Vector3(x, 1.0 + row * 0.25, z), false)
+
+
+func _physics_process(_delta: float) -> void:
+	if _smoke_mode == "":
+		return
+	_smoke_ticks += 1
+	if _smoke_mode == "stack" and _smoke_ticks >= 360:  # 6 c симуляции
+		_finish_smoke_stack()
+
+
+func _finish_smoke_stack() -> void:
+	_smoke_mode = ""
+	var total := 0
+	var asleep := 0
+	var fallen := 0
+	for coin in coins_root.get_children():
+		total += 1
+		if coin.sleeping:
+			asleep += 1
+		if coin.global_position.y < -1.5:
+			fallen += 1
+	var ok := total == 50 and fallen == 0 and asleep >= total * 0.9
+	print("SMOKE %s: coins=%d asleep=%d fallen=%d" %
+		["OK" if ok else "FAIL", total, asleep, fallen])
+	get_tree().quit(0 if ok else 1)
 
 
 func _process(_delta: float) -> void:
