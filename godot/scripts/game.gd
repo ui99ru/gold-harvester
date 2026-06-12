@@ -254,7 +254,7 @@ func _build_hud_and_menu() -> void:
 		["Звон", true, func(on: bool) -> void:
 			clinks.enabled = on
 			for coin in pool.get_children():
-				coin.contact_monitor = on],
+				coin.set_clink_wanted(on)],
 		["Завал плашмя", true, func(on: bool) -> void:
 			for coin in pool.get_children():
 				coin.calm_flatten = on],

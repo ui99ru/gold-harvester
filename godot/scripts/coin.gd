@@ -28,6 +28,9 @@ var worth := 1                             # ценность; множится 
 # Вызывается main'ом: (global_pos: Vector3, strength: float 0..1)
 var clink_cb := Callable()
 
+# «Звон» on/off (тумблер). Монитор контактов — только у активных монет (O5).
+var clink_wanted := true
+
 static var _shape: CylinderShape3D
 static var _mesh: CylinderMesh
 static var _material: StandardMaterial3D
@@ -72,8 +75,13 @@ func _ready() -> void:
 	linear_damp = 0.8                                    # rapier linDamp
 	angular_damp = 0.9                                   # rapier angDamp
 	can_sleep = true
-	contact_monitor = true                               # нужен для get_contact_count в _integrate_forces
-	max_contacts_reported = 1                            # для звона хватает 1 точки; меньше репортов = дешевле
+	# O5: контакт-монитор 1000 спящих тел — главная цена Jolt (замер на устройстве:
+	# jolt 101→45 мс при выключенном «Звоне»). Держим его только у бодрствующих
+	# монет, способных звенеть; спящие/замороженные — без монитора. Управление —
+	# по событию засыпания/пробуждения, без поллинга.
+	contact_monitor = false                              # включится в _refresh_monitor по пробуждении
+	max_contacts_reported = 1                            # для звона хватает 1 точки
+	sleeping_state_changed.connect(_refresh_monitor)
 
 	var cs := CollisionShape3D.new()
 	cs.shape = _shape
@@ -83,6 +91,17 @@ func _ready() -> void:
 	mi.mesh = _mesh
 	mi.material_override = _material
 	add_child(mi)
+
+
+## Контакт-монитор только у активных монет (O5). set_deferred — безопасно из
+## колбэка sleeping_state_changed (вне физ-шага применится в конце кадра).
+func _refresh_monitor() -> void:
+	set_deferred("contact_monitor", clink_wanted and not freeze and not sleeping)
+
+
+func set_clink_wanted(on: bool) -> void:
+	clink_wanted = on
+	_refresh_monitor()
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
