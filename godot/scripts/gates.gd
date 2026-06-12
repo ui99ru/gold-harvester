@@ -183,14 +183,17 @@ func _step_active() -> void:
 		var k: int = mini(mult - 1, mini(CFG.GATE_BURST, game.pool.free_count()))
 		coin.worth = w * (mult - k)
 		for c in k:
-			var fz: float = 0.9 + game.rnd() * 0.9
-			var sl: float = clampf(lat + (game.rnd() - 0.5) * 2.5,
+			# Копии выплёскиваются ВПЕРЁД волной у земли и разливаются по плоскости,
+			# а не вспухают плотным облаком (высокоплотная зона → взрыв контактов):
+			# широкий разброс вперёд/вбок, спавн низко, минимальная вертикаль.
+			var fz: float = 0.9 + game.rnd() * 2.6
+			var sl: float = clampf(lat + (game.rnd() - 0.5) * 3.6,
 				-CFG.LANE_HALF + 0.6, CFG.LANE_HALF - 0.6)
-			var vf: float = now_s * (CFG.BURST_FWD + game.rnd() * 2.5)
+			var vf: float = now_s * (CFG.BURST_FWD + game.rnd() * 3.0)
 			var vl: float = (game.rnd() - 0.5) * 3.0
 			var copy: RigidBody3D = game.pool.spawn(Vector3(
 				position.x + normal.x * now_s * fz + right.x * sl,
-				0.5 + game.rnd() * 0.7,
+				0.12 + game.rnd() * 0.22,
 				position.z + normal.z * now_s * fz + right.z * sl), false)
 			if copy == null:
 				break
@@ -199,7 +202,7 @@ func _step_active() -> void:
 				cb.call(copy.idx)  # копия: чистая регистрация, без срабатывания
 			copy.linear_velocity = Vector3(
 				normal.x * vf + right.x * vl,
-				CFG.BURST_UP + game.rnd() * 2.0,
+				0.4 + game.rnd() * 0.9,
 				normal.z * vf + right.z * vl)
 			copy.angular_velocity = Vector3(
 				(game.rnd() - 0.5) * 14.0, 0, (game.rnd() - 0.5) * 14.0)
