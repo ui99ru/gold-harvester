@@ -25,18 +25,21 @@ var _frames := 0
 func _ready() -> void:
 	_label = Label.new()
 	_label.position = Vector2(24, 72)
-	_label.add_theme_font_size_override("font_size", 16)
-	_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.92))
+	# Крупнее + тёмная обводка — читается на телефоне поверх светлого грунта
+	_label.add_theme_font_size_override("font_size", 32)
+	_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_label.add_theme_constant_override("outline_size", 10)
 	add_child(_label)
 
 	var box := VBoxContainer.new()
-	box.position = Vector2(24, 232)
+	box.position = Vector2(24, 360)
 	add_child(box)
 	for t in toggles:
 		var cb := CheckButton.new()
 		cb.text = t[0]
 		cb.button_pressed = t[1]
-		cb.add_theme_font_size_override("font_size", 18)
+		cb.add_theme_font_size_override("font_size", 24)
 		cb.toggled.connect(t[2])
 		box.add_child(cb)
 
