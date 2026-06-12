@@ -124,22 +124,27 @@ func _ready() -> void:
 	_update_camera(0.0)
 
 
-## Респаун монеты в источнике (web main.js:151): seeded-разброс + падение
-## с высоты — оседают в кучу некопланарно, солвер стабилен.
+## Респаун монеты в источнике: у земли + радиальный разлёт «волной». Монеты
+## расплываются тонким слоем, НЕ складываются в плотную башню. Прежний вариант
+## (узкий радиус 0.8 + падение с 6 м) давал колонну в ~250 слоёв с глубоким
+## взаимопроникновением → взрыв контактов в ковше (jolt 500+ мс). Трение/демпф
+## быстро тормозят разлёт; некомпланарный наклон держит солвер стабильным.
 func place_at_source(coin: RigidBody3D) -> void:
 	if coin == null:
 		return
 	coin.make_active()  # O3: ссыпанная/респавненная монета снова dynamic (если была dormant)
-	var a := rnd() * 6.28
+	var a := rnd() * TAU
 	var r := sqrt(rnd()) * level.source_radius
-	var y := CFG.COIN_THK * 0.5 + rnd() * 6.0
+	var y := CFG.COIN_THK * 0.5 + rnd() * 0.5   # у земли (было *6.0 — башня/проникновение)
+	var dir := Vector3(cos(a), 0.0, sin(a))
 	coin.worth = 1
 	for cb in side_resetters:
 		cb.call(coin.idx)  # телепорт != пересечение ворот
-	coin.transform = Transform3D(Basis(),
-		level.source_pos + Vector3(cos(a) * r, y, sin(a) * r))
-	coin.linear_velocity = Vector3.ZERO
-	coin.angular_velocity = Vector3.ZERO
+	coin.transform = Transform3D(
+		Basis.from_euler(Vector3(rnd() * TAU, rnd() * TAU, rnd() * TAU)),  # некомпланарно
+		level.source_pos + dir * r + Vector3(0, y, 0))
+	coin.linear_velocity = dir * (CFG.SOURCE_SPREAD_V * (0.6 + rnd() * 0.8))  # «волна» наружу
+	coin.angular_velocity = Vector3((rnd() - 0.5) * 6.0, (rnd() - 0.5) * 6.0, (rnd() - 0.5) * 6.0)
 
 
 func _on_coin_clink(pos: Vector3, strength: float) -> void:

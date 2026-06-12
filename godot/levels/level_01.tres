@@ -141,7 +141,7 @@ params = {}
 [resource]
 script = ExtResource("1")
 source_pos = Vector3(0, 0, 9)
-source_radius = 0.8
+source_radius = 2.5
 start_coins = 5
 dozer_start = Vector3(0, 0, 0)
 ring_center = Vector3(0, 0, 31)

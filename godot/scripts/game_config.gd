@@ -80,6 +80,7 @@ const SPEED_LERP := 5.0
 const COIN_N := 1000          # пул тел (web-замер: 1000 ≈ потолок 60fps)
 const LANE_HALF := 2.8
 const SRC_R := 0.8
+const SOURCE_SPREAD_V := 3.5  # радиальный разлёт монет при респауне («волна», против плотной башни)
 
 # --- UP-апгрейды: стартовые значения (мутабельная копия живёт в game.gd) ---
 const UP_BLADE_HALF := 1.6
