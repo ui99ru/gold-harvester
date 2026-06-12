@@ -35,7 +35,7 @@ var clink_wanted := true
 # dynamic-солвера Jolt, но коллайдер и видима). Возврат в dynamic при подъезде.
 var dormant := false
 
-static var _shape: CylinderShape3D
+static var _shape: ConvexHullShape3D
 static var _mesh: CylinderMesh
 static var _material: StandardMaterial3D
 static var _phys_material: PhysicsMaterial
@@ -44,9 +44,20 @@ static var _phys_material: PhysicsMaterial
 static func _ensure_shared() -> void:
 	if _shape:
 		return
-	_shape = CylinderShape3D.new()
-	_shape.radius = RADIUS
-	_shape.height = THICKNESS
+	# Коллизия — 12-гранная призма (ConvexHullShape), НЕ CylinderShape3D: в Jolt
+	# цилиндр-цилиндр контакты дорогие (док Jolt рекомендует convex hull), и при
+	# давке в ковше их цена взрывается. Rapier (web) цилиндры считает дёшево —
+	# отсюда разрыв 1000 монет@11мс (web) против 150@500мс (наш Jolt). Меш — диск.
+	_shape = ConvexHullShape3D.new()
+	var hull_pts := PackedVector3Array()
+	var sides := 12
+	for i in sides:
+		var ang := TAU * i / float(sides)
+		var cx := cos(ang) * RADIUS
+		var cz := sin(ang) * RADIUS
+		hull_pts.append(Vector3(cx, THICKNESS * 0.5, cz))
+		hull_pts.append(Vector3(cx, -THICKNESS * 0.5, cz))
+	_shape.points = hull_pts
 
 	_mesh = CylinderMesh.new()
 	_mesh.top_radius = RADIUS
