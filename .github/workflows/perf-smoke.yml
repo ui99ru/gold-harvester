@@ -3,6 +3,7 @@ name: perf-smoke
 # Автозамер физики без телефона: гоняет headless-смоуки (game.gd _smoke_tick)
 # в Godot-CI и печатает тайминги (phys/gd/peak + прокси телефона ×8) в лог.
 # Читаем числа из лога — ручной прогон APK на устройстве больше не нужен.
+# Падает на script/runtime-ошибках, чтобы сломанная сборка не печатала мусор.
 
 on:
   push:
@@ -21,16 +22,23 @@ jobs:
         run: godot --headless --path godot --import || true
 
       # Каждый смоук детерминирован (seed), сам себя завершает get_tree().quit().
-      # timeout — страховка от зависания. || true — чтобы прочитать числа даже при
-      # ненулевом коде выхода correctness-смоуков.
-      - name: stress (1000 монет, давка ножом)
-        run: timeout 120 godot --headless --path godot -- --smoke-stress || true
+      # timeout — страховка от зависания. Весь вывод в smoke.log.
+      - name: Run perf smokes
+        run: |
+          set +e
+          LOG=smoke.log; : > "$LOG"
+          for args in "--smoke-stress" "--smoke-bucket" "--smoke-spike" "--coins=500 --smoke-stress"; do
+            echo "===== godot -- $args =====" | tee -a "$LOG"
+            timeout 120 godot --headless --path godot -- $args 2>&1 | tee -a "$LOG"
+          done
 
-      - name: bucket (ком в ковше)
-        run: timeout 120 godot --headless --path godot -- --smoke-bucket || true
+          echo ""
+          echo "================= SMOKE RESULTS ================="
+          grep -E "^SMOKE|^bucket t=|^stress |^spike " "$LOG" || echo "(нет строк результатов!)"
+          echo "================================================"
 
-      - name: spike (каскад копий ×100)
-        run: timeout 120 godot --headless --path godot -- --smoke-spike || true
-
-      - name: stress N=500 (свип)
-        run: timeout 120 godot --headless --path godot -- --coins=500 --smoke-stress || true
+          # Гейт: любая script/runtime-ошибка => числа невалидны, валим джоб.
+          if grep -qE "SCRIPT ERROR|Parse Error|Failed to load script|Invalid assignment|Nil" "$LOG"; then
+            echo "::error::script/runtime errors in smoke — perf numbers invalid"
+            exit 1
+          fi

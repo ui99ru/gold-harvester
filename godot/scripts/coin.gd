@@ -35,7 +35,7 @@ var clink_wanted := true
 # dynamic-солвера Jolt, но коллайдер и видима). Возврат в dynamic при подъезде.
 var dormant := false
 
-static var _shape: ConvexHullShape3D
+static var _shape: ConvexPolygonShape3D
 static var _mesh: CylinderMesh
 static var _material: StandardMaterial3D
 static var _phys_material: PhysicsMaterial
@@ -48,7 +48,7 @@ static func _ensure_shared() -> void:
 	# цилиндр-цилиндр контакты дорогие (док Jolt рекомендует convex hull), и при
 	# давке в ковше их цена взрывается. Rapier (web) цилиндры считает дёшево —
 	# отсюда разрыв 1000 монет@11мс (web) против 150@500мс (наш Jolt). Меш — диск.
-	_shape = ConvexHullShape3D.new()
+	_shape = ConvexPolygonShape3D.new()  # Godot-имя выпуклой оболочки (НЕ ConvexHullShape3D — это Jolt/Bullet)
 	var hull_pts := PackedVector3Array()
 	var sides := 12
 	for i in sides:
