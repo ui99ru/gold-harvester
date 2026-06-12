@@ -27,14 +27,20 @@ jobs:
         run: |
           set +e
           LOG=smoke.log; : > "$LOG"
-          for args in "--smoke-stress" "--smoke-bucket" "--smoke-spike" "--coins=500 --smoke-stress"; do
+          # A/B формы коллайдера (convex по умолчанию vs --coin-cyl) + базовые сцены.
+          for args in \
+            "--smoke-stress" \
+            "--coin-cyl --smoke-stress" \
+            "--smoke-bucket" \
+            "--coin-cyl --smoke-bucket" \
+            "--smoke-spike"; do
             echo "===== godot -- $args =====" | tee -a "$LOG"
             timeout 120 godot --headless --path godot -- $args 2>&1 | tee -a "$LOG"
           done
 
           echo ""
           echo "================= SMOKE RESULTS ================="
-          grep -E "^SMOKE|^bucket t=|^stress |^spike " "$LOG" || echo "(нет строк результатов!)"
+          grep -E "^===== godot|^SMOKE|^spike " "$LOG" || echo "(нет строк результатов!)"
           echo "================================================"
 
           # Гейт: любая script/runtime-ошибка => числа невалидны, валим джоб.

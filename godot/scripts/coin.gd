@@ -1,3 +1,4 @@
+class_name Coin
 extends RigidBody3D
 ## Монета. Физпараметры перенесены из Three.js-версии (src/config.js, src/main.js).
 ## Геометрия и материал — общие static-ресурсы: один меш и один материал на все
@@ -35,7 +36,8 @@ var clink_wanted := true
 # dynamic-солвера Jolt, но коллайдер и видима). Возврат в dynamic при подъезде.
 var dormant := false
 
-static var _shape: ConvexPolygonShape3D
+static var _shape: Shape3D
+static var collision_cylinder := false   # A/B (--coin-cyl): True = CylinderShape3D (старое), иначе convex
 static var _mesh: CylinderMesh
 static var _material: StandardMaterial3D
 static var _phys_material: PhysicsMaterial
@@ -44,20 +46,27 @@ static var _phys_material: PhysicsMaterial
 static func _ensure_shared() -> void:
 	if _shape:
 		return
-	# Коллизия — 12-гранная призма (ConvexHullShape), НЕ CylinderShape3D: в Jolt
-	# цилиндр-цилиндр контакты дорогие (док Jolt рекомендует convex hull), и при
-	# давке в ковше их цена взрывается. Rapier (web) цилиндры считает дёшево —
-	# отсюда разрыв 1000 монет@11мс (web) против 150@500мс (наш Jolt). Меш — диск.
-	_shape = ConvexPolygonShape3D.new()  # Godot-имя выпуклой оболочки (НЕ ConvexHullShape3D — это Jolt/Bullet)
-	var hull_pts := PackedVector3Array()
-	var sides := 12
-	for i in sides:
-		var ang := TAU * i / float(sides)
-		var cx := cos(ang) * RADIUS
-		var cz := sin(ang) * RADIUS
-		hull_pts.append(Vector3(cx, THICKNESS * 0.5, cz))
-		hull_pts.append(Vector3(cx, -THICKNESS * 0.5, cz))
-	_shape.points = hull_pts
+	# Коллизия по умолчанию — 12-гранная призма (ConvexPolygonShape3D), НЕ цилиндр:
+	# в Jolt цилиндр-цилиндр контакты дорогие (док Jolt рекомендует convex hull), а
+	# Rapier (web) цилиндры считает дёшево. Флаг collision_cylinder (--coin-cyl) даёт
+	# A/B со старым CylinderShape3D на той же машине. Меш — всегда диск.
+	if collision_cylinder:
+		var cyl := CylinderShape3D.new()
+		cyl.radius = RADIUS
+		cyl.height = THICKNESS
+		_shape = cyl
+	else:
+		var hull := ConvexPolygonShape3D.new()
+		var hull_pts := PackedVector3Array()
+		var sides := 12
+		for i in sides:
+			var ang := TAU * i / float(sides)
+			var cx := cos(ang) * RADIUS
+			var cz := sin(ang) * RADIUS
+			hull_pts.append(Vector3(cx, THICKNESS * 0.5, cz))
+			hull_pts.append(Vector3(cx, -THICKNESS * 0.5, cz))
+		hull.points = hull_pts
+		_shape = hull
 
 	_mesh = CylinderMesh.new()
 	_mesh.top_radius = RADIUS

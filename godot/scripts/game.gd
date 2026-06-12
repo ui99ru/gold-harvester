@@ -348,6 +348,8 @@ func _parse_user_args() -> void:
 			seeded = true
 		elif arg.begins_with("--coins="):
 			_pool_size_override = int(arg.get_slice("=", 1))  # свип размера пула
+		elif arg == "--coin-cyl":
+			Coin.collision_cylinder = true  # A/B формы коллайдера (до pool.setup → до _ensure_shared)
 		elif arg.begins_with("--smoke-"):
 			_smoke_mode = arg.trim_prefix("--smoke-")
 			test_mode = true
