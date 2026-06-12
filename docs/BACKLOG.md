@@ -26,10 +26,11 @@
 
 Задачи (по возрастанию стоимости — сперва дешёвые замеры, потом архитектура):
 
-- [ ] **O1. Разделить замер `physics`: Jolt-движок vs GDScript-экономика.** Сейчас HUD
-  (`performance_hud.gd:57`) показывает суммарный `TIME_PHYSICS_PROCESS`. В смоуке `--smoke-stress`
-  разделение уже есть (`game.gd:686-707`, `_gd_accum` меряет O(N)-циклы). Вывести этот сплит
-  **в живой HUD**, чтобы знать, куда из 58 мс уходит время, и не оптимизировать вслепую.
+- [x] **O1. Разделить замер `physics`: Jolt-движок vs GDScript-экономика.** Живой HUD теперь
+  показывает `physics X (jolt Y / gd Z)`: `game.gd` меряет чистое время `_physics_process`
+  (`_sim_us_last`), HUD считает `jolt = physics − gd` (`TIME_PHYSICS_PROCESS` включает колбэки
+  `_physics_process`). Прочитать числа на устройстве → направить O2/O3. _(Реализовано; сверка —
+  на APK.)_
 - [ ] **O2. Снять O(N) GDScript-поллинг зон.** `gate.step` (`gates.gd:133` и `:161`),
   `pad.step` (`pads.gd`), `trash.step` (`trash_pad.gd`) каждый физ-тик проходят по **всем 1000**
   `game.pool.get_children()` с чтением `coin.global_position` (вызов в физ-сервер). 2 ворот + пад

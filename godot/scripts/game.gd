@@ -76,6 +76,7 @@ var _loop_laps := 0
 var _loop_nodes0 := 0
 var _pool_size_override := 0
 var _gd_accum := 0
+var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
 var _cal_sun := 1.0
@@ -239,6 +240,8 @@ func _build_hud_and_menu() -> void:
 	hud.spawn_50_cb = func() -> void:
 		for i in 50:
 			place_at_source(pool.spawn(Vector3.ZERO, false))
+	hud.gd_time_cb = func() -> float:
+		return _sim_us_last / 1000.0  # мс GDScript-сима за последний физ-тик
 	hud.toggles = [
 		["Тени", true, func(on: bool) -> void:
 			sun.shadow_enabled = on],
@@ -634,13 +637,18 @@ func _apply_script_input() -> void:
 
 func _physics_process(delta: float) -> void:
 	if phase != "play":
+		_sim_us_last = 0
 		return
+	# Чистое время GDScript-сима за тик. TIME_PHYSICS_PROCESS включает и шаг
+	# физ-сервера, и эти колбэки → в HUD «jolt» = physics − gd (см. O1, BACKLOG).
+	var t0 := Time.get_ticks_usec()
 	if _script_target != Vector3.INF:
 		_apply_script_input()
 	else:
 		_apply_live_input()
 	sim_step(delta)
 	_smoke_tick()
+	_sim_us_last = Time.get_ticks_usec() - t0
 
 
 func sim_step(dt: float) -> void:

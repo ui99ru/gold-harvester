@@ -4,6 +4,7 @@ extends CanvasLayer
 
 var spawn_50_cb := Callable()
 var pool_stats_cb := Callable()  # -> Vector2i(active, free)
+var gd_time_cb := Callable()     # -> float: мс GDScript-сима за последний физ-тик (O1)
 var toggles: Array = []          # [[название, старт, Callable(bool)], ...]
 
 # Прокси слабого железа: замерено на одной сцене (~240 монет):
@@ -17,6 +18,7 @@ const FRAME_BUDGET_MS := 16.7
 var _label: Label
 var _frame_accum := 0.0
 var _phys_accum := 0.0
+var _gd_accum := 0.0
 var _frames := 0
 
 
@@ -55,6 +57,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_frame_accum += delta
 	_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+	if gd_time_cb.is_valid():
+		_gd_accum += gd_time_cb.call()  # уже в мс
 	_frames += 1
 	if _frame_accum < 0.5:
 		return
@@ -62,11 +66,13 @@ func _process(delta: float) -> void:
 	if pool_stats_cb.is_valid():
 		pool = pool_stats_cb.call()
 	var phys_ms := 1000.0 * _phys_accum / _frames
+	var gd_ms := _gd_accum / _frames                  # GDScript-сим (экономика/пузырь/дозер)
+	var jolt_ms := maxf(0.0, phys_ms - gd_ms)         # остаток = шаг физ-сервера Jolt
 	var phone_ms := phys_ms * PHONE_FACTOR
-	_label.text = "FPS %d  |  frame %.2f ms\nphysics %.2f ms\n≈телефон %.1f / %.1f ms\nactive bodies %d\ncoins %d / pool %d" % [
+	_label.text = "FPS %d  |  frame %.2f ms\nphysics %.2f ms (jolt %.2f / gd %.2f)\n≈телефон %.1f / %.1f ms\nactive bodies %d\ncoins %d / pool %d" % [
 		Engine.get_frames_per_second(),
 		1000.0 * _frame_accum / _frames,
-		phys_ms, phone_ms, FRAME_BUDGET_MS,
+		phys_ms, jolt_ms, gd_ms, phone_ms, FRAME_BUDGET_MS,
 		Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS),
 		pool.x, pool.y,
 	]
@@ -74,4 +80,5 @@ func _process(delta: float) -> void:
 		Color(1, 0.45, 0.4) if phone_ms > FRAME_BUDGET_MS else Color(1, 1, 1, 0.92))
 	_frame_accum = 0.0
 	_phys_accum = 0.0
+	_gd_accum = 0.0
 	_frames = 0
