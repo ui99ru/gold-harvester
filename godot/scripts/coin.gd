@@ -36,6 +36,11 @@ var clink_wanted := true
 # dynamic-солвера Jolt, но коллайдер и видима). Возврат в dynamic при подъезде.
 var dormant := false
 
+# O3b «позиционный нож»: монета в зоне ножа — gripped (freeze KINEMATIC + слои 0,
+# позиция снапается к полосе/стопке каждый кадр в game._update_blade_grip). Не
+# грузит солвер; реальная физика только у входящих/разлетающихся. Возврат — ungrip.
+var gripped := false
+
 static var _shape: Shape3D
 static var force_convex := false   # A/B (--coin-convex): true → 12-гранная призма. По умолчанию CylinderShape3D — замер показал, что цилиндр в Jolt на ~18% БЫСТРЕЕ convex
 static var _mesh: CylinderMesh
@@ -152,6 +157,30 @@ func make_active() -> void:
 	collision_layer = 1
 	collision_mask = 1
 	sleeping = false
+	_refresh_monitor()
+
+
+## O3b: захватить монету в ковш — позиционная (kinematic-freeze + слои 0, без
+## контактов и солвера). Позицию задаёт game._update_blade_grip каждый кадр.
+func grip() -> void:
+	if gripped:
+		return
+	gripped = true
+	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC  # для скриптовой позы
+	freeze = true
+	collision_layer = 0
+	collision_mask = 0
+	_refresh_monitor()
+
+
+func ungrip() -> void:
+	if not gripped:
+		return
+	gripped = false
+	freeze = false
+	freeze_mode = RigidBody3D.FREEZE_MODE_STATIC  # вернуть дефолт (для park/dormant)
+	collision_layer = 1
+	collision_mask = 1
 	_refresh_monitor()
 
 

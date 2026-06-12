@@ -7,6 +7,8 @@ extends Node3D
 const LEVEL := preload("res://levels/level_01.tres")
 const DOZER_R := 1.6
 const BLADE_R := 0.35
+const GRIP_LANE := 0.7   # O3b: ширина полосы захвата (≈ диаметр монеты)
+const GRIP_CAP := 8      # O3b: высота стопки в полосе до перелива обратно в физику
 
 # --- Мутабельное состояние (web: src/state.js) ---
 var up_blade_half := CFG.UP_BLADE_HALF
@@ -77,6 +79,7 @@ var _loop_nodes0 := 0
 var _pool_size_override := 0
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
+var _grip_lanes := {}   # O3b: счётчик стопки на полосу (переиспользуется каждый кадр)
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
 var _cal_sun := 1.0
@@ -132,6 +135,7 @@ func _ready() -> void:
 func place_at_source(coin: RigidBody3D) -> void:
 	if coin == null:
 		return
+	coin.ungrip()       # O3b: снять из ковша (если была gripped)
 	coin.make_active()  # O3: ссыпанная/респавненная монета снова dynamic (если была dormant)
 	var a := rnd() * TAU
 	var r := sqrt(rnd()) * level.source_radius
@@ -689,6 +693,7 @@ func sim_step(dt: float) -> void:
 	dozer.position.y = ground_lift + sin(sim_time * 20.0) * 0.02 * minf(1.0, speed_now / 3.0)
 	dozer.anim_tracks(dt, speed_now)
 	dozer.update_body_poses()  # кинематика ковша/шасси (web setKinematicPoses)
+	_update_blade_grip()       # O3b: монеты в зоне ножа — позиционные (не грузят солвер)
 	audio.pump_engine(minf(1.0, speed_now / up_move), phase == "play")
 	# Пыль из-под траков (web :377, :247)
 	if speed_now > 3.5 and rndv() < 0.6:
@@ -740,6 +745,43 @@ func _emit_dust() -> void:
 			"color": Color("9a92a8"), "life": 0.55, "size": 0.5, "size1": 1.3,
 			"vy": 0.5, "grav": 0.4,
 			"vx": (rndv() - 0.5) * 0.6, "vz": (rndv() - 0.5) * 0.6, "fade": 0.32})
+
+
+## O3b «позиционный нож» (порт инсайта web §5.5): монеты в зоне ножа выводим из
+## физики (grip: kinematic-freeze + слои 0) и каждый кадр снапаем к полосам/стопкам,
+## едущим с дозером. Реальная физика — только у входящих/разлетающихся/осыпающихся.
+## Так в Jolt-динамике остаётся горстка, а визуально — полный ковш золота.
+func _update_blade_grip() -> void:
+	var dpos := dozer.position
+	var h := heading
+	var fwd := Vector3(sin(h), 0.0, cos(h))
+	var rgt := Vector3(cos(h), 0.0, -sin(h))
+	var bhalf := dozer.blade_hx() + 0.2
+	var front: float = Dozer.BLADE_FWD + 0.35
+	var thk := CFG.COIN_THK
+	var flat := Basis(Vector3.UP, h)
+	_grip_lanes.clear()
+	for coin in pool.get_children():
+		if coin.get_meta("in_pool", false) or coin.dormant:
+			continue
+		var dx: float = coin.global_position.x - dpos.x
+		var dz: float = coin.global_position.z - dpos.z
+		var lz := dx * fwd.x + dz * fwd.z
+		var lx := dx * rgt.x + dz * rgt.z
+		if lz > 0.0 and lz < front + 0.7 and absf(lx) < bhalf:
+			var lane := roundi(lx / GRIP_LANE)
+			var cnt: int = _grip_lanes.get(lane, 0)
+			if cnt >= GRIP_CAP:        # полоса полна → перелив: пусть валится физикой вбок
+				if coin.gripped:
+					coin.ungrip()
+				continue
+			_grip_lanes[lane] = cnt + 1
+			coin.grip()
+			var yy := thk * 0.5 + cnt * thk * 0.95
+			coin.global_transform = Transform3D(flat,
+				dpos + fwd * front + rgt * (lane * GRIP_LANE) + Vector3(0.0, yy, 0.0))
+		elif coin.gripped:
+			coin.ungrip()
 
 
 func ground_y_under(x: float, z: float) -> float:
