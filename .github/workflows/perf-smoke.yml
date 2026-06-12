@@ -1,0 +1,36 @@
+name: perf-smoke
+
+# Автозамер физики без телефона: гоняет headless-смоуки (game.gd _smoke_tick)
+# в Godot-CI и печатает тайминги (phys/gd/peak + прокси телефона ×8) в лог.
+# Читаем числа из лога — ручной прогон APK на устройстве больше не нужен.
+
+on:
+  push:
+    branches: ['claude/asmr-gameplay-direction-ihmv2x', 'xp/godot']
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.4.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import assets
+        run: godot --headless --path godot --import || true
+
+      # Каждый смоук детерминирован (seed), сам себя завершает get_tree().quit().
+      # timeout — страховка от зависания. || true — чтобы прочитать числа даже при
+      # ненулевом коде выхода correctness-смоуков.
+      - name: stress (1000 монет, давка ножом)
+        run: timeout 120 godot --headless --path godot -- --smoke-stress || true
+
+      - name: bucket (ком в ковше)
+        run: timeout 120 godot --headless --path godot -- --smoke-bucket || true
+
+      - name: spike (каскад копий ×100)
+        run: timeout 120 godot --headless --path godot -- --smoke-spike || true
+
+      - name: stress N=500 (свип)
+        run: timeout 120 godot --headless --path godot -- --coins=500 --smoke-stress || true
