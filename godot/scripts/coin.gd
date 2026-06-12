@@ -37,7 +37,7 @@ var clink_wanted := true
 var dormant := false
 
 static var _shape: Shape3D
-static var collision_cylinder := false   # A/B (--coin-cyl): True = CylinderShape3D (старое), иначе convex
+static var force_convex := false   # A/B (--coin-convex): true → 12-гранная призма. По умолчанию CylinderShape3D — замер показал, что цилиндр в Jolt на ~18% БЫСТРЕЕ convex
 static var _mesh: CylinderMesh
 static var _material: StandardMaterial3D
 static var _phys_material: PhysicsMaterial
@@ -46,16 +46,11 @@ static var _phys_material: PhysicsMaterial
 static func _ensure_shared() -> void:
 	if _shape:
 		return
-	# Коллизия по умолчанию — 12-гранная призма (ConvexPolygonShape3D), НЕ цилиндр:
-	# в Jolt цилиндр-цилиндр контакты дорогие (док Jolt рекомендует convex hull), а
-	# Rapier (web) цилиндры считает дёшево. Флаг collision_cylinder (--coin-cyl) даёт
-	# A/B со старым CylinderShape3D на той же машине. Меш — всегда диск.
-	if collision_cylinder:
-		var cyl := CylinderShape3D.new()
-		cyl.radius = RADIUS
-		cyl.height = THICKNESS
-		_shape = cyl
-	else:
+	# Коллизия монеты — CylinderShape3D (по умолчанию). Гипотезу «цилиндр дорог в
+	# Jolt» проверили A/B-смоуком: цилиндр на ~18% БЫСТРЕЕ 12-гранной призмы
+	# (stress 1000: 17.4 vs 21.4 мс). Convex оставлен под флагом --coin-convex
+	# только для будущих сверок. Меш — всегда диск.
+	if force_convex:
 		var hull := ConvexPolygonShape3D.new()
 		var hull_pts := PackedVector3Array()
 		var sides := 12
@@ -67,6 +62,11 @@ static func _ensure_shared() -> void:
 			hull_pts.append(Vector3(cx, -THICKNESS * 0.5, cz))
 		hull.points = hull_pts
 		_shape = hull
+	else:
+		var cyl := CylinderShape3D.new()
+		cyl.radius = RADIUS
+		cyl.height = THICKNESS
+		_shape = cyl
 
 	_mesh = CylinderMesh.new()
 	_mesh.top_radius = RADIUS

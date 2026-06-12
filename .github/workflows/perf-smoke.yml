@@ -27,13 +27,11 @@ jobs:
         run: |
           set +e
           LOG=smoke.log; : > "$LOG"
-          # A/B формы коллайдера (convex по умолчанию vs --coin-cyl) + базовые сцены.
           for args in \
             "--smoke-stress" \
-            "--coin-cyl --smoke-stress" \
             "--smoke-bucket" \
-            "--coin-cyl --smoke-bucket" \
-            "--smoke-spike"; do
+            "--smoke-spike" \
+            "--coins=500 --smoke-stress"; do
             echo "===== godot -- $args =====" | tee -a "$LOG"
             timeout 120 godot --headless --path godot -- $args 2>&1 | tee -a "$LOG"
           done
