@@ -769,12 +769,10 @@ func _update_blade_grip() -> void:
 		var lz := dx * fwd.x + dz * fwd.z
 		var lx := dx * rgt.x + dz * rgt.z
 		if lz > 0.0 and lz < front + 0.7 and absf(lx) < bhalf:
+			# ВСЕ монеты в зоне — позиционные (стопками по полосам). Перелива в
+			# физику нет: иначе при большом коме сотни монет остаются динамикой.
 			var lane := roundi(lx / GRIP_LANE)
 			var cnt: int = _grip_lanes.get(lane, 0)
-			if cnt >= GRIP_CAP:        # полоса полна → перелив: пусть валится физикой вбок
-				if coin.gripped:
-					coin.ungrip()
-				continue
 			_grip_lanes[lane] = cnt + 1
 			coin.grip()
 			var yy := thk * 0.5 + cnt * thk * 0.95
@@ -938,6 +936,17 @@ func _setup_smoke() -> void:
 			n += 1
 		dozer.position = Vector3(0, 0, 4)
 		_script_target = Vector3(0, 0, 13)
+	elif _smoke_mode == "grip":
+		# Диагностика O3b: неподвижный дозер, 150 монет прямо в зоне ножа (впереди,
+		# heading 0 → fwd=+z). Все должны загриппиться → если грип дёшев, phys≈0.
+		dozer.position = Vector3(0, 0, 0)
+		var n := 0
+		for i in 150:
+			pool.spawn(Vector3(
+				-1.0 + 0.5 * (n % 5),
+				0.3 + 0.2 * floorf(n / 25.0),
+				1.0 + 0.3 * (floori(n / 5.0) % 5)), false)
+			n += 1
 
 
 func _descendants(n: Node) -> int:
@@ -1064,6 +1073,19 @@ func _smoke_tick() -> void:
 		if _smoke_ticks >= 720:  # 12 c
 			var avg_ms := 1000.0 * _phys_accum / 600.0
 			print("SMOKE bucket: avg_physics=%.2f ms (≈телефон %.1f ms)" % [avg_ms, avg_ms * 8.0])
+			get_tree().quit(0)
+	elif _smoke_mode == "grip":
+		# Диагностика O3b: загриппленные + phys. Если грип дёшев — phys≈0.
+		if _smoke_ticks > 120:
+			_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+		if _smoke_ticks >= 420:  # 7 c (2 c усадка + 5 c замер)
+			var ng := 0
+			for coin in pool.get_children():
+				if not coin.get_meta("in_pool", false) and coin.gripped:
+					ng += 1
+			var avg_ms := 1000.0 * _phys_accum / 300.0
+			print("SMOKE grip: gripped=%d/150 avg_physics=%.2f ms (≈телефон %.1f ms)" %
+				[ng, avg_ms, avg_ms * 8.0])
 			get_tree().quit(0)
 	elif _smoke_mode == "stress":
 		# Замер ОСЕВШЕЙ кучи: усредняем только последние 5 c (ticks 600..900),

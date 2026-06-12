@@ -28,6 +28,7 @@ jobs:
           set +e
           LOG=smoke.log; : > "$LOG"
           for args in \
+            "--smoke-grip" \
             "--smoke-stress" \
             "--smoke-bucket" \
             "--smoke-spike" \
