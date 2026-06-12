@@ -108,15 +108,18 @@ func set_clink_wanted(on: bool) -> void:
 	_refresh_monitor()
 
 
-## O3: вывести осевшую дальнюю монету из dynamic-симуляции. freeze=true делает
-## тело статиком (нет интеграции/островов/dynamic-пар), но коллизия остаётся —
-## активные монеты на ней лежат, а не проваливаются. Возврат — make_active.
+## O3: вывести осевшую дальнюю монету из симуляции — ровно как паркует пул
+## (freeze=статик + слои в 0: ни островов, ни контактных пар), но на месте и
+## видимой. Сохранять коллизию нельзя — freeze с коллизией дробит спящий остров
+## кучи и выходит ДОРОЖЕ (замер: jolt 101→172). Возврат — make_active.
 func make_dormant() -> void:
 	if dormant or freeze:
 		return
 	dormant = true
 	linear_velocity = Vector3.ZERO
 	angular_velocity = Vector3.ZERO
+	collision_layer = 0
+	collision_mask = 0
 	freeze = true
 	_refresh_monitor()
 
@@ -126,6 +129,8 @@ func make_active() -> void:
 		return
 	dormant = false
 	freeze = false
+	collision_layer = 1
+	collision_mask = 1
 	_refresh_monitor()
 
 
