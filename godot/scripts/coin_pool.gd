@@ -39,6 +39,7 @@ func spawn(pos: Vector3, random_tilt := true) -> RigidBody3D:
 	coin.freeze = false
 	coin.linear_velocity = Vector3.ZERO
 	coin.angular_velocity = Vector3.ZERO
+	coin.dormant = false     # O3: свежая монета — активная (dynamic)
 	coin._refresh_monitor()  # O5: свежеспавненная монета активна → монитор контактов on
 	return coin
 
@@ -75,5 +76,6 @@ func _park(coin: RigidBody3D) -> void:
 	# Слои обязательно в 0: замороженное тело — статик и иначе коллайдит
 	coin.collision_layer = 0
 	coin.collision_mask = 0
+	coin.dormant = false     # O3: запаркованная пулом — не dormant-состояние
 	coin.position = Vector3(0, -100, 0)
 	coin._refresh_monitor()  # O5: замороженная монета — без монитора контактов

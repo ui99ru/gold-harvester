@@ -131,8 +131,8 @@ func step(_dt: float) -> void:
 		return
 	var cnt := 0
 	for coin in game.pool.get_children():
-		if coin.freeze:
-			continue
+		if coin.get_meta("in_pool", false):
+			continue  # O3: пропускаем только запаркованных пулом; dormant (статик, но в игре) — поллим
 		var p: Vector3 = coin.global_position
 		var gx: float = p.x - position.x
 		var gz: float = p.z - position.z
@@ -159,8 +159,8 @@ func step(_dt: float) -> void:
 func _step_active() -> void:
 	var crossed := 0
 	for coin in game.pool.get_children():
-		if coin.freeze:
-			continue
+		if coin.get_meta("in_pool", false):
+			continue  # O3: пропускаем только запаркованных пулом; dormant (статик, но в игре) — поллим
 		var p: Vector3 = coin.global_position
 		var gx: float = p.x - position.x
 		var gz: float = p.z - position.z

@@ -129,6 +129,7 @@ func _ready() -> void:
 func place_at_source(coin: RigidBody3D) -> void:
 	if coin == null:
 		return
+	coin.make_active()  # O3: ссыпанная/респавненная монета снова dynamic (если была dormant)
 	var a := rnd() * 6.28
 	var r := sqrt(rnd()) * level.source_radius
 	var y := CFG.COIN_THK * 0.5 + rnd() * 6.0
@@ -687,22 +688,28 @@ func sim_step(dt: float) -> void:
 		_emit_dust()
 	dozer_pos = dozer.position
 	dozer_shadow.position = Vector3(dozer.position.x, 0.04, dozer.position.z)
-	# Активный пузырь: дальние осевшие монеты усыпляем принудительно — дозер их
-	# всё равно не трогает, а Jolt сам будит их контактом при подъезде. Бьёт по
-	# корню лага «монеты в ковше»: разбуженная куча держала 70-150 бодрствующих
-	# тяжёлых цилиндров; пузырь срезал до ~17 (worktree-замер). Радиус 7 м.
+	# Активный пузырь (O3 «физический LOD»): осевшие дальние монеты выводим из
+	# dynamic-симуляции (make_dormant: freeze=статик — вне островов/солвера Jolt,
+	# но коллайдер и видима), а при подъезде дозера возвращаем (make_active). В
+	# Jolt-«динамике» остаются лишь монеты у ножа → снимается остаток ~45 мс/тик
+	# от 1000 спящих тел. Гистерезис: спим >8 м, будим <6 м (дозер reach ~2 м —
+	# монета успевает стать коллайдером до касания).
 	var _gd0 := Time.get_ticks_usec() if _smoke_mode == "stress" else 0
 	if Engine.get_physics_frames() % 10 == 0:
 		var dz := dozer.position
 		for coin in pool.get_children():
-			if coin.freeze or coin.sleeping:
-				continue
+			if coin.get_meta("in_pool", false):
+				continue  # запаркованные пулом
 			var p: Vector3 = coin.global_position
 			var dx := p.x - dz.x
 			var dzz := p.z - dz.z
-			if dx * dx + dzz * dzz > 49.0 and p.y < 0.6 \
+			var d2 := dx * dx + dzz * dzz
+			if coin.dormant:
+				if d2 < 36.0:
+					coin.make_active()
+			elif d2 > 64.0 and p.y < 0.6 \
 					and coin.linear_velocity.length_squared() < 1.0:
-				coin.sleeping = true
+				coin.make_dormant()
 	# Экономика (web stepEconomy; физика монет шагает движком после)
 	for gt in gates:
 		gt.step(dt)
@@ -1051,8 +1058,8 @@ func _smoke_tick() -> void:
 			var total_worth := 0
 			var n_active := 0
 			for coin in pool.get_children():
-				if coin.freeze:
-					continue
+				if coin.get_meta("in_pool", false):
+					continue  # O3: dormant-монеты (статик, но в игре) считаем
 				total_worth += coin.worth
 				n_active += 1
 			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
@@ -1067,8 +1074,8 @@ func _smoke_tick() -> void:
 			var plowed := 0
 			var inv := dozer.global_transform.affine_inverse()
 			for coin in pool.get_children():
-				if coin.freeze:
-					continue
+				if coin.get_meta("in_pool", false):
+					continue  # O3: dormant-монеты (статик, но в игре) считаем
 				var p: Vector3 = coin.global_position
 				if p.y < -0.5:
 					fallen += 1

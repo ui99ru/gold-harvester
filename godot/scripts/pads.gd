@@ -79,8 +79,8 @@ func step(_dt: float) -> void:
 		return
 	var cnt := 0
 	for coin in game.pool.get_children():
-		if coin.freeze:
-			continue
+		if coin.get_meta("in_pool", false):
+			continue  # O3: dormant-монеты (статик, но в игре) тоже поллим
 		var p: Vector3 = coin.global_position
 		if absf(p.x - position.x) < HALF and absf(p.z - position.z) < HALF:
 			var v: float = coin.worth * game.up_mult

@@ -31,6 +31,10 @@ var clink_cb := Callable()
 # «Звон» on/off (тумблер). Монитор контактов — только у активных монет (O5).
 var clink_wanted := true
 
+# O3 «физический LOD»: осевшая вдали монета — dormant (freeze=статик, вне
+# dynamic-солвера Jolt, но коллайдер и видима). Возврат в dynamic при подъезде.
+var dormant := false
+
 static var _shape: CylinderShape3D
 static var _mesh: CylinderMesh
 static var _material: StandardMaterial3D
@@ -101,6 +105,27 @@ func _refresh_monitor() -> void:
 
 func set_clink_wanted(on: bool) -> void:
 	clink_wanted = on
+	_refresh_monitor()
+
+
+## O3: вывести осевшую дальнюю монету из dynamic-симуляции. freeze=true делает
+## тело статиком (нет интеграции/островов/dynamic-пар), но коллизия остаётся —
+## активные монеты на ней лежат, а не проваливаются. Возврат — make_active.
+func make_dormant() -> void:
+	if dormant or freeze:
+		return
+	dormant = true
+	linear_velocity = Vector3.ZERO
+	angular_velocity = Vector3.ZERO
+	freeze = true
+	_refresh_monitor()
+
+
+func make_active() -> void:
+	if not dormant:
+		return
+	dormant = false
+	freeze = false
 	_refresh_monitor()
 
 
