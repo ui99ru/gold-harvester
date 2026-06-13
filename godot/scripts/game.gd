@@ -781,8 +781,11 @@ func _update_blade_grip() -> void:
 	for coin in pool.get_children():
 		if coin.get_meta("in_pool", false) or coin.dormant:
 			continue
-		var dx: float = coin.global_position.x - dpos.x
-		var dz: float = coin.global_position.z - dpos.z
+		# Для уже gripped — зону считаем по _grip_slot (визуал едет с дозером): тело
+		# заморожено в стороне и отстаёт, по нему монета бы сразу отгриппилась.
+		var pos: Vector3 = coin._grip_slot if coin.gripped else coin.global_position
+		var dx: float = pos.x - dpos.x
+		var dz: float = pos.z - dpos.z
 		var lz := dx * fwd.x + dz * fwd.z
 		var lx := dx * rgt.x + dz * rgt.z
 		if lz > 0.0 and lz < front + 0.7 and absf(lx) < bhalf:
