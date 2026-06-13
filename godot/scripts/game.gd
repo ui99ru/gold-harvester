@@ -80,6 +80,7 @@ var _pool_size_override := 0
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
 var _grip_lanes := {}   # O3b: счётчик стопки на полосу (переиспользуется каждый кадр)
+var _grip_mm: MultiMeshInstance3D   # O3b: визуал gripped-монет (физ-тела заморожены, рендер тут)
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
 var _cal_sun := 1.0
@@ -109,6 +110,7 @@ func _ready() -> void:
 	pool.name = "Coins"
 	add_child(pool)
 	pool.setup(_pool_size_override if _pool_size_override > 0 else CFG.COIN_N, _on_coin_clink)
+	_build_grip_multimesh()  # O3b: общий визуал монет в ковше
 	_build_entities()
 	_build_bank_ui()
 	for i in level.start_coins:
@@ -751,6 +753,19 @@ func _emit_dust() -> void:
 ## физики (grip: kinematic-freeze + слои 0) и каждый кадр снапаем к полосам/стопкам,
 ## едущим с дозером. Реальная физика — только у входящих/разлетающихся/осыпающихся.
 ## Так в Jolt-динамике остаётся горстка, а визуально — полный ковш золота.
+func _build_grip_multimesh() -> void:
+	Coin._ensure_shared()
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = Coin._mesh
+	mm.instance_count = pool.size
+	mm.visible_instance_count = 0
+	_grip_mm = MultiMeshInstance3D.new()
+	_grip_mm.multimesh = mm
+	_grip_mm.material_override = Coin._material
+	add_child(_grip_mm)
+
+
 func _update_blade_grip() -> void:
 	var dpos := dozer.position
 	var h := heading
@@ -760,6 +775,8 @@ func _update_blade_grip() -> void:
 	var front: float = Dozer.BLADE_FWD + 0.35
 	var thk := CFG.COIN_THK
 	var flat := Basis(Vector3.UP, h)
+	var mm := _grip_mm.multimesh
+	var idx := 0
 	_grip_lanes.clear()
 	for coin in pool.get_children():
 		if coin.get_meta("in_pool", false) or coin.dormant:
@@ -769,17 +786,20 @@ func _update_blade_grip() -> void:
 		var lz := dx * fwd.x + dz * fwd.z
 		var lx := dx * rgt.x + dz * rgt.z
 		if lz > 0.0 and lz < front + 0.7 and absf(lx) < bhalf:
-			# ВСЕ монеты в зоне — позиционные (стопками по полосам). Перелива в
-			# физику нет: иначе при большом коме сотни монет остаются динамикой.
+			# ВСЕ монеты в зоне — позиционные (стопками по полосам). Физ-тело
+			# заморожено на месте (грош цены), рендерит MultiMesh — он и едет с дозером.
 			var lane := roundi(lx / GRIP_LANE)
 			var cnt: int = _grip_lanes.get(lane, 0)
 			_grip_lanes[lane] = cnt + 1
-			coin.grip()
 			var yy := thk * 0.5 + cnt * thk * 0.95
-			coin.global_transform = Transform3D(flat,
-				dpos + fwd * front + rgt * (lane * GRIP_LANE) + Vector3(0.0, yy, 0.0))
+			var slot := dpos + fwd * front + rgt * (lane * GRIP_LANE) + Vector3(0.0, yy, 0.0)
+			coin.grip()
+			coin._grip_slot = slot
+			mm.set_instance_transform(idx, Transform3D(flat, slot))
+			idx += 1
 		elif coin.gripped:
 			coin.ungrip()
+	mm.visible_instance_count = idx
 
 
 func ground_y_under(x: float, z: float) -> float:
