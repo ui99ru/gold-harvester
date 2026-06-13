@@ -794,7 +794,9 @@ func _update_blade_grip() -> void:
 			var lane := roundi(lx / GRIP_LANE)
 			var cnt: int = _grip_lanes.get(lane, 0)
 			_grip_lanes[lane] = cnt + 1
-			var yy := thk * 0.5 + cnt * thk * 0.95
+			# Высоту стопки ограничиваем GRIP_CAP (иначе ком растёт шпилем); лишнее
+			# садится на «потолок» полосы — визуально плоская куча, физика всё равно ~0.
+			var yy := thk * 0.5 + mini(cnt, GRIP_CAP) * thk * 0.95
 			var slot := dpos + fwd * front + rgt * (lane * GRIP_LANE) + Vector3(0.0, yy, 0.0)
 			coin.grip()
 			coin._grip_slot = slot
