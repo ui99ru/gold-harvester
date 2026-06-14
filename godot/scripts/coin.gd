@@ -36,12 +36,6 @@ var clink_wanted := true
 # dynamic-солвера Jolt, но коллайдер и видима). Возврат в dynamic при подъезде.
 var dormant := false
 
-# O3b «позиционный нож»: монета в зоне ножа — gripped. Физ-тело заморожено как у
-# пула (freeze STATIC + слои 0 = ~0 цены, тело НЕ двигаем), а рендерится через
-# общий MultiMesh (game._update_blade_grip), который и едет с дозером.
-var gripped := false
-var _grip_slot := Vector3.ZERO   # последняя позиция визуала — для непрерывности при ungrip
-
 static var _shape: Shape3D
 static var force_convex := false   # A/B (--coin-convex): true → 12-гранная призма. По умолчанию CylinderShape3D — замер показал, что цилиндр в Jolt на ~18% БЫСТРЕЕ convex
 static var _mesh: CylinderMesh
@@ -158,32 +152,6 @@ func make_active() -> void:
 	collision_layer = 1
 	collision_mask = 1
 	sleeping = false
-	_refresh_monitor()
-
-
-## O3b: захватить монету в ковш — позиционная (kinematic-freeze + слои 0, без
-## контактов и солвера). Позицию задаёт game._update_blade_grip каждый кадр.
-func grip() -> void:
-	if gripped:
-		return
-	gripped = true
-	freeze_mode = RigidBody3D.FREEZE_MODE_STATIC  # тело замораживаем на месте (НЕ двигаем)
-	freeze = true
-	collision_layer = 0
-	collision_mask = 0
-	visible = false   # свой меш прячем — рендерит общий MultiMesh
-	_refresh_monitor()
-
-
-func ungrip() -> void:
-	if not gripped:
-		return
-	gripped = false
-	freeze = false
-	collision_layer = 1
-	collision_mask = 1
-	visible = true
-	global_position = _grip_slot   # продолжить с позиции визуала (тело стояло замороженным в стороне)
 	_refresh_monitor()
 
 

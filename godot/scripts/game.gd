@@ -7,8 +7,6 @@ extends Node3D
 const LEVEL := preload("res://levels/level_01.tres")
 const DOZER_R := 1.6
 const BLADE_R := 0.35
-const GRIP_LANE := 0.7   # O3b: ширина полосы захвата (≈ диаметр монеты)
-const GRIP_CAP := 8      # O3b: высота стопки в полосе до перелива обратно в физику
 
 # --- Мутабельное состояние (web: src/state.js) ---
 var up_blade_half := CFG.UP_BLADE_HALF
@@ -79,8 +77,6 @@ var _loop_nodes0 := 0
 var _pool_size_override := 0
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
-var _grip_lanes := {}   # O3b: счётчик стопки на полосу (переиспользуется каждый кадр)
-var _grip_mm: MultiMeshInstance3D   # O3b: визуал gripped-монет (физ-тела заморожены, рендер тут)
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
 var _cal_sun := 1.0
@@ -110,7 +106,6 @@ func _ready() -> void:
 	pool.name = "Coins"
 	add_child(pool)
 	pool.setup(_pool_size_override if _pool_size_override > 0 else CFG.COIN_N, _on_coin_clink)
-	_build_grip_multimesh()  # O3b: общий визуал монет в ковше
 	_build_entities()
 	_build_bank_ui()
 	for i in level.start_coins:
@@ -137,7 +132,6 @@ func _ready() -> void:
 func place_at_source(coin: RigidBody3D) -> void:
 	if coin == null:
 		return
-	coin.ungrip()       # O3b: снять из ковша (если была gripped)
 	coin.make_active()  # O3: ссыпанная/респавненная монета снова dynamic (если была dormant)
 	var a := rnd() * TAU
 	var r := sqrt(rnd()) * level.source_radius
@@ -705,7 +699,6 @@ func sim_step(dt: float) -> void:
 	dozer.position.y = ground_lift + sin(sim_time * 20.0) * 0.02 * minf(1.0, speed_now / 3.0)
 	dozer.anim_tracks(dt, speed_now)
 	dozer.update_body_poses()  # кинематика ковша/шасси (web setKinematicPoses)
-	_update_blade_grip()       # O3b: монеты в зоне ножа — позиционные (не грузят солвер)
 	audio.pump_engine(minf(1.0, speed_now / up_move), phase == "play")
 	# Пыль из-под траков (web :377, :247)
 	if speed_now > 3.5 and rndv() < 0.6:
@@ -757,64 +750,6 @@ func _emit_dust() -> void:
 			"color": Color("9a92a8"), "life": 0.55, "size": 0.5, "size1": 1.3,
 			"vy": 0.5, "grav": 0.4,
 			"vx": (rndv() - 0.5) * 0.6, "vz": (rndv() - 0.5) * 0.6, "fade": 0.32})
-
-
-## O3b «позиционный нож» (порт инсайта web §5.5): монеты в зоне ножа выводим из
-## физики (grip: kinematic-freeze + слои 0) и каждый кадр снапаем к полосам/стопкам,
-## едущим с дозером. Реальная физика — только у входящих/разлетающихся/осыпающихся.
-## Так в Jolt-динамике остаётся горстка, а визуально — полный ковш золота.
-func _build_grip_multimesh() -> void:
-	Coin._ensure_shared()
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = Coin._mesh
-	mm.instance_count = pool.size
-	mm.visible_instance_count = 0
-	_grip_mm = MultiMeshInstance3D.new()
-	_grip_mm.multimesh = mm
-	_grip_mm.material_override = Coin._material
-	add_child(_grip_mm)
-
-
-func _update_blade_grip() -> void:
-	var dpos := dozer.position
-	var h := heading
-	var fwd := Vector3(sin(h), 0.0, cos(h))
-	var rgt := Vector3(cos(h), 0.0, -sin(h))
-	var bhalf := dozer.blade_hx() + 0.2
-	var front: float = Dozer.BLADE_FWD + 0.35
-	var thk := CFG.COIN_THK
-	var flat := Basis(Vector3.UP, h)
-	var mm := _grip_mm.multimesh
-	var idx := 0
-	_grip_lanes.clear()
-	for coin in pool.get_children():
-		if coin.get_meta("in_pool", false) or coin.dormant:
-			continue
-		# Для уже gripped — зону считаем по _grip_slot (визуал едет с дозером): тело
-		# заморожено в стороне и отстаёт, по нему монета бы сразу отгриппилась.
-		var pos: Vector3 = coin._grip_slot if coin.gripped else coin.global_position
-		var dx: float = pos.x - dpos.x
-		var dz: float = pos.z - dpos.z
-		var lz := dx * fwd.x + dz * fwd.z
-		var lx := dx * rgt.x + dz * rgt.z
-		if lz > 0.0 and lz < front + 0.7 and absf(lx) < bhalf:
-			# ВСЕ монеты в зоне — позиционные (стопками по полосам). Физ-тело
-			# заморожено на месте (грош цены), рендерит MultiMesh — он и едет с дозером.
-			var lane := roundi(lx / GRIP_LANE)
-			var cnt: int = _grip_lanes.get(lane, 0)
-			_grip_lanes[lane] = cnt + 1
-			# Высоту стопки ограничиваем GRIP_CAP (иначе ком растёт шпилем); лишнее
-			# садится на «потолок» полосы — визуально плоская куча, физика всё равно ~0.
-			var yy := thk * 0.5 + mini(cnt, GRIP_CAP) * thk * 0.95
-			var slot := dpos + fwd * front + rgt * (lane * GRIP_LANE) + Vector3(0.0, yy, 0.0)
-			coin.grip()
-			coin._grip_slot = slot
-			mm.set_instance_transform(idx, Transform3D(flat, slot))
-			idx += 1
-		elif coin.gripped:
-			coin.ungrip()
-	mm.visible_instance_count = idx
 
 
 func ground_y_under(x: float, z: float) -> float:
@@ -971,17 +906,6 @@ func _setup_smoke() -> void:
 			n += 1
 		dozer.position = Vector3(0, 0, 4)
 		_script_target = Vector3(0, 0, 13)
-	elif _smoke_mode == "grip":
-		# Диагностика O3b: неподвижный дозер, 150 монет прямо в зоне ножа (впереди,
-		# heading 0 → fwd=+z). Все должны загриппиться → если грип дёшев, phys≈0.
-		dozer.position = Vector3(0, 0, 0)
-		var n := 0
-		for i in 150:
-			pool.spawn(Vector3(
-				-1.0 + 0.5 * (n % 5),
-				0.3 + 0.2 * floorf(n / 25.0),
-				1.0 + 0.3 * (floori(n / 5.0) % 5)), false)
-			n += 1
 
 
 func _descendants(n: Node) -> int:
@@ -1108,19 +1032,6 @@ func _smoke_tick() -> void:
 		if _smoke_ticks >= 720:  # 12 c
 			var avg_ms := 1000.0 * _phys_accum / 600.0
 			print("SMOKE bucket: avg_physics=%.2f ms (≈телефон %.1f ms)" % [avg_ms, avg_ms * 8.0])
-			get_tree().quit(0)
-	elif _smoke_mode == "grip":
-		# Диагностика O3b: загриппленные + phys. Если грип дёшев — phys≈0.
-		if _smoke_ticks > 120:
-			_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
-		if _smoke_ticks >= 420:  # 7 c (2 c усадка + 5 c замер)
-			var ng := 0
-			for coin in pool.get_children():
-				if not coin.get_meta("in_pool", false) and coin.gripped:
-					ng += 1
-			var avg_ms := 1000.0 * _phys_accum / 300.0
-			print("SMOKE grip: gripped=%d/150 avg_physics=%.2f ms (≈телефон %.1f ms)" %
-				[ng, avg_ms, avg_ms * 8.0])
 			get_tree().quit(0)
 	elif _smoke_mode == "stress":
 		# Замер ОСЕВШЕЙ кучи: усредняем только последние 5 c (ticks 600..900),
