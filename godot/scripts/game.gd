@@ -597,13 +597,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			cam_zoom = clampf(cam_zoom * 1.08, CFG.CAM_ZOOM_MIN, CFG.CAM_ZOOM_MAX)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			cam_zoom = clampf(cam_zoom / 1.08, CFG.CAM_ZOOM_MIN, CFG.CAM_ZOOM_MAX)
-	# Виртуальный джойстик: касание → база в точке пальца, драг тянет ручку.
+	# Фиксированный джойстик (правый нижний угол): касание в его зоне → ведём драг.
 	elif event is InputEventScreenTouch:
-		driving = event.pressed
 		if event.pressed:
-			_joy.show_at(event.position)
+			driving = _joy.press(event.position)
 		else:
-			_joy.hide_joy()
+			if driving:
+				_joy.release()
+			driving = false
 	elif event is InputEventScreenDrag and driving:
 		_joy.move_knob(event.position)
 
@@ -620,8 +621,9 @@ func _apply_live_input() -> void:
 			var sa := sin(CFG.CAM_YAW)
 			var ca := cos(CFG.CAM_YAW)
 			var up_amt := -off.y   # экран: ось y вниз → «вверх» отрицателен
-			var wx := up_amt * (-sa) + off.x * ca
-			var wz := up_amt * ca + off.x * sa
+			var rx := -off.x       # инверсия лево/право (по фидбэку)
+			var wx := up_amt * (-sa) + rx * ca
+			var wz := up_amt * ca + rx * sa
 			ctrl_desired = atan2(wx, wz)
 	var kx := 0.0
 	var kz := 0.0
