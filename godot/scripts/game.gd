@@ -707,28 +707,33 @@ func sim_step(dt: float) -> void:
 		_emit_dust()
 	dozer_pos = dozer.position
 	dozer_shadow.position = Vector3(dozer.position.x, 0.04, dozer.position.z)
-	# Активный пузырь (O3 «физический LOD»): осевшие дальние монеты выводим из
-	# dynamic-симуляции (make_dormant: freeze=статик — вне островов/солвера Jolt,
-	# но коллайдер и видима), а при подъезде дозера возвращаем (make_active). В
-	# Jolt-«динамике» остаются лишь монеты у ножа → снимается остаток ~45 мс/тик
-	# от 1000 спящих тел. Гистерезис: спим >8 м, будим <6 м (дозер reach ~2 м —
-	# монета успевает стать коллайдером до касания).
+	# O3 «умный dormant»: монета физическая только в РАБОЧЕЙ ЗОНЕ перед ножом
+	# (её вот-вот сгребём). Всё осевшее в стороне/позади усыпляем (make_dormant:
+	# sleeping + слои 0 — нет пар/интеграции), даже близкое; будим, когда монета
+	# заходит в зону (подъезд/поворот). Так «стою в большой куче» не грузит солвер —
+	# активны только монеты на пути ножа. Внешняя граница шире внутренней (гистерезис
+	# против мерцания); зона направленная (вращается с курсом). reach ножа ~2 м,
+	# зона вперёд 6 м → монета оживает задолго до касания.
 	var _gd0 := Time.get_ticks_usec() if _smoke_mode == "stress" else 0
 	if Engine.get_physics_frames() % 10 == 0:
 		var dz := dozer.position
+		var sn2 := sin(heading)
+		var cs2 := cos(heading)
+		var bw := dozer.blade_hx()
 		for coin in pool.get_children():
 			if coin.get_meta("in_pool", false):
 				continue  # запаркованные пулом
 			var p: Vector3 = coin.global_position
 			var dx := p.x - dz.x
 			var dzz := p.z - dz.z
-			var d2 := dx * dx + dzz * dzz
+			var lz := dx * sn2 + dzz * cs2   # вдоль курса (вперёд +)
+			var lat := dx * cs2 - dzz * sn2  # вбок
 			if coin.dormant:
-				if d2 < 36.0:
-					coin.make_active()
-			elif d2 > 64.0 and p.y < 0.6 \
-					and coin.linear_velocity.length_squared() < 1.0:
-				coin.make_dormant()
+				if lz > -3.0 and lz < 6.0 and absf(lat) < bw + 1.6:
+					coin.make_active()       # зашла в рабочую зону → в физику
+			elif p.y < 0.6 and coin.linear_velocity.length_squared() < 1.0:
+				if lz < -4.5 or lz > 7.5 or absf(lat) > bw + 3.2:
+					coin.make_dormant()      # осела вне зоны (с запасом) → спим
 	# Экономика (web stepEconomy; физика монет шагает движком после)
 	for gt in gates:
 		gt.step(dt)
