@@ -64,7 +64,7 @@ var ground_lift := 0.0
 var ctrl_desired := NAN
 var ctrl_moving := false
 
-var _drag_pos := Vector2.ZERO
+var _joy: VirtualJoystick   # виртуальный джойстик (мобильное управление)
 var _script_target := Vector3.INF   # сценарная цель (смоуки; web __sim.setTarget)
 var _smoke_mode := ""
 var _smoke_ticks := 0
@@ -272,6 +272,14 @@ func _build_hud_and_menu() -> void:
 				coin.calm_flatten = on],
 	]
 	add_child(hud)
+
+	# Виртуальный джойстик (мобильное управление) — на своём слое под меню (layer 2),
+	# чтобы кнопки/HUD были сверху и ловили касания первыми.
+	var joy_layer := CanvasLayer.new()
+	joy_layer.layer = 1
+	add_child(joy_layer)
+	_joy = VirtualJoystick.new()
+	joy_layer.add_child(_joy)
 
 
 static func fmt(n: float) -> String:
@@ -595,12 +603,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			cam_zoom = clampf(cam_zoom * 1.08, CFG.CAM_ZOOM_MIN, CFG.CAM_ZOOM_MAX)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			cam_zoom = clampf(cam_zoom / 1.08, CFG.CAM_ZOOM_MIN, CFG.CAM_ZOOM_MAX)
-	# Драг по земле = руль (web pointerdown/move/up; мышь эмулирует тач)
+	# Виртуальный джойстик: касание → база в точке пальца, драг тянет ручку.
 	elif event is InputEventScreenTouch:
 		driving = event.pressed
-		_drag_pos = event.position
+		if event.pressed:
+			_joy.show_at(event.position)
+		else:
+			_joy.hide_joy()
 	elif event is InputEventScreenDrag and driving:
-		_drag_pos = event.position
+		_joy.move_knob(event.position)
 
 
 # --- Ввод -> ctrl (web applyLiveInput/applyScriptInput :322-331) ---
@@ -609,16 +620,15 @@ func _apply_live_input() -> void:
 	ctrl_desired = NAN
 	ctrl_moving = false
 	if driving:
-		var origin := camera.project_ray_origin(_drag_pos)
-		var dir := camera.project_ray_normal(_drag_pos)
-		if absf(dir.y) > 0.0001:
-			var t := -origin.y / dir.y
-			if t > 0.0:
-				var hit := origin + dir * t
-				var dx := hit.x - dozer.position.x
-				var dz := hit.z - dozer.position.z
-				if dx * dx + dz * dz > 0.4:
-					ctrl_desired = atan2(dx, dz)
+		# Курс из джойстика с учётом наклона камеры: экран-вверх = «от камеры».
+		var off := _joy.offset()
+		if off.length() > VirtualJoystick.DEADZONE:
+			var sa := sin(CFG.CAM_YAW)
+			var ca := cos(CFG.CAM_YAW)
+			var up_amt := -off.y   # экран: ось y вниз → «вверх» отрицателен
+			var wx := up_amt * (-sa) + off.x * ca
+			var wz := up_amt * ca + off.x * sa
+			ctrl_desired = atan2(wx, wz)
 	var kx := 0.0
 	var kz := 0.0
 	if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
