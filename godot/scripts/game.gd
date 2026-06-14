@@ -78,6 +78,7 @@ var _pool_size_override := 0
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
 var _coin_mm: MultiMeshInstance3D   # общий рендер монет (как web InstancedMesh), инстанс = coin.idx
+var _gold_mm: MultiMeshInstance3D   # шаг 3: визуальное золото сверх физ-пула (без физики)
 # Скрытый инстанс MultiMesh: крошечный масштаб + далеко (вырождается → не рисуется).
 var _HIDDEN_XF := Transform3D(
 	Basis(Vector3(0.0001, 0, 0), Vector3(0, 0.0001, 0), Vector3(0, 0, 0.0001)),
@@ -112,6 +113,7 @@ func _ready() -> void:
 	add_child(pool)
 	pool.setup(_pool_size_override if _pool_size_override > 0 else CFG.COIN_N, _on_coin_clink)
 	_build_coin_multimesh()  # общий рендер всех монет одним MultiMesh
+	_build_gold_field()      # шаг 3: визуальное золото сверх физ-пула (кнопка «+5000»)
 	_build_entities()
 	_build_bank_ui()
 	for i in level.start_coins:
@@ -244,6 +246,22 @@ func _build_hud_and_menu() -> void:
 	mute.pressed.connect(func() -> void:
 		mute.text = "🔇" if audio.toggle_mute() else "🔊")
 	layer.add_child(mute)
+
+	# Шаг 3: кнопка докидывать ВИЗУАЛЬНОЕ золото (MultiMesh, без физики) — ищем
+	# потолок рендера прямо на телефоне: жми и смотри FPS.
+	var gold_btn := Button.new()
+	gold_btn.text = "+5000 золота"
+	gold_btn.add_theme_font_size_override("font_size", 26)
+	gold_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	gold_btn.offset_left = -250
+	gold_btn.offset_top = 84
+	gold_btn.offset_right = -16
+	gold_btn.offset_bottom = 144
+	gold_btn.pressed.connect(func() -> void:
+		if _gold_mm:
+			var gm := _gold_mm.multimesh
+			gm.visible_instance_count = mini(gm.instance_count, gm.visible_instance_count + 5000))
+	layer.add_child(gold_btn)
 
 	# Performance HUD + тумблеры тюнинга (петля «десктоп + прокси телефона»)
 	var hud := preload("res://scripts/performance_hud.gd").new()
@@ -1133,6 +1151,32 @@ func _build_coin_multimesh() -> void:
 	_coin_mm.multimesh = mm
 	_coin_mm.material_override = Coin._material
 	add_child(_coin_mm)
+
+
+## Шаг 3: «море золота» — визуальные монеты сверх физ-пула (без физ-тел), один
+## MultiMesh. Преаллокация 50k инстансов (разбросаны ковром по арене, лежат
+## плашмя), visible_instance_count=0; кнопка «+5000 золота» крутит видимое число
+## — так на телефоне ищем потолок рендера. Физики у них ноль. rndv → не трогает сим.
+func _build_gold_field() -> void:
+	var cap := 50000
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = Coin._mesh
+	mm.instance_count = cap
+	var r_max: float = level.ring_radius * 0.9 if level.ring_radius > 0.0 else 40.0
+	var ctr := level.ring_center
+	for i in cap:
+		var a := rndv() * TAU
+		var rr := sqrt(rndv()) * r_max
+		var b := Basis.from_euler(Vector3((rndv() - 0.5) * 0.5, rndv() * TAU, (rndv() - 0.5) * 0.5))
+		mm.set_instance_transform(i, Transform3D(b, Vector3(
+			ctr.x + cos(a) * rr, 0.03 + rndv() * 0.14, ctr.z + sin(a) * rr)))
+	mm.visible_instance_count = 0
+	_gold_mm = MultiMeshInstance3D.new()
+	_gold_mm.name = "GoldField"
+	_gold_mm.multimesh = mm
+	_gold_mm.material_override = Coin._material
+	add_child(_gold_mm)
 
 
 ## Рендер всех монет одним MultiMesh (порт web syncCoins/InstancedMesh): каждый
