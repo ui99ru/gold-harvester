@@ -77,6 +77,11 @@ var _loop_nodes0 := 0
 var _pool_size_override := 0
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
+var _coin_mm: MultiMeshInstance3D   # общий рендер монет (как web InstancedMesh), инстанс = coin.idx
+# Скрытый инстанс MultiMesh: крошечный масштаб + далеко (вырождается → не рисуется).
+var _HIDDEN_XF := Transform3D(
+	Basis(Vector3(0.0001, 0, 0), Vector3(0, 0.0001, 0), Vector3(0, 0, 0.0001)),
+	Vector3(0, -9999, 0))
 
 # Калибровка света по web-эталону (--cal=sun,ambient): множители энергий.
 var _cal_sun := 1.0
@@ -106,6 +111,7 @@ func _ready() -> void:
 	pool.name = "Coins"
 	add_child(pool)
 	pool.setup(_pool_size_override if _pool_size_override > 0 else CFG.COIN_N, _on_coin_clink)
+	_build_coin_multimesh()  # общий рендер всех монет одним MultiMesh
 	_build_entities()
 	_build_bank_ui()
 	for i in level.start_coins:
@@ -1114,5 +1120,34 @@ func _smoke_tick() -> void:
 			get_tree().quit(0 if ok else 1)
 
 
+func _build_coin_multimesh() -> void:
+	Coin._ensure_shared()
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = Coin._mesh
+	mm.instance_count = pool.size
+	for i in pool.size:
+		mm.set_instance_transform(i, _HIDDEN_XF)
+	_coin_mm = MultiMeshInstance3D.new()
+	_coin_mm.name = "CoinMultiMesh"
+	_coin_mm.multimesh = mm
+	_coin_mm.material_override = Coin._material
+	add_child(_coin_mm)
+
+
+## Рендер всех монет одним MultiMesh (порт web syncCoins/InstancedMesh): каждый
+## кадр пишем трансформ по coin.idx; запаркованные пулом — скрытый инстанс.
+func _sync_coins_mm() -> void:
+	if _coin_mm == null:
+		return
+	var mm := _coin_mm.multimesh
+	for coin in pool.get_children():
+		if coin.get_meta("in_pool", false):
+			mm.set_instance_transform(coin.idx, _HIDDEN_XF)
+		else:
+			mm.set_instance_transform(coin.idx, coin.global_transform)
+
+
 func _process(delta: float) -> void:
 	_update_camera(delta)
+	_sync_coins_mm()

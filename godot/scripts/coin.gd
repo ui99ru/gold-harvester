@@ -110,11 +110,8 @@ func _ready() -> void:
 	var cs := CollisionShape3D.new()
 	cs.shape = _shape
 	add_child(cs)
-
-	var mi := MeshInstance3D.new()
-	mi.mesh = _mesh
-	mi.material_override = _material
-	add_child(mi)
+	# Меш НЕ добавляем: все монеты рисует общий MultiMesh (game._coin_mm),
+	# инстанс по coin.idx — как web InstancedMesh. 1 draw-call вместо N.
 
 
 ## Контакт-монитор только у активных монет (O5). set_deferred — безопасно из
