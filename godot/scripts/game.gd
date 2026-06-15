@@ -273,11 +273,11 @@ func _build_hud_and_menu() -> void:
 	hud.gd_time_cb = func() -> float:
 		return _sim_us_last / 1000.0  # мс GDScript-сима за последний физ-тик
 	hud.toggles = [
-		["Тени", false, func(on: bool) -> void:
+		["Тени", true, func(on: bool) -> void:
 			sun.shadow_enabled = on],
 		["Тики 50", false, func(on: bool) -> void:
 			Engine.physics_ticks_per_second = 50 if on else 60],
-		["MSAA 2x", false, func(on: bool) -> void:
+		["MSAA 2x", true, func(on: bool) -> void:
 			get_viewport().msaa_3d = Viewport.MSAA_2X if on else Viewport.MSAA_DISABLED],
 		["Glow", true, func(on: bool) -> void:
 			world_env.glow_enabled = on],
@@ -466,7 +466,7 @@ func _build_environment() -> void:
 	sun = DirectionalLight3D.new()
 	sun.light_color = Color("fff4de")
 	sun.light_energy = CFG.SUN_INT * 0.30 * _cal_sun  # калибровка по web-эталону
-	sun.shadow_enabled = false  # мобайл-дефолт: тени ~5 мс на этом GPU (тумблер «Тени» включает)
+	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	# web: позиция (10,22,6), смотрит в origin
 	sun.look_at_from_position(Vector3(10, 22, 6), Vector3.ZERO, Vector3.UP)
@@ -952,6 +952,19 @@ func _smoke_tick() -> void:
 	var pm := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 	if pm > _phys_max:
 		_phys_max = pm
+	if _smoke_mode == "idle":
+		# Сцена «как на телефоне»: старт (5 монет, 995 в пуле), дозер стоит.
+		# Замер физики для сопоставления CI↔телефон (как HUD: physics/jolt/gd).
+		if _smoke_ticks > 60:
+			_phys_accum += pm
+			_gd_accum += _sim_us_last
+		if _smoke_ticks >= 360:  # 6 c
+			var phys := 1000.0 * _phys_accum / 300.0
+			var gd := 0.001 * _gd_accum / 300.0
+			print("SMOKE idle: coins=%d/%d physics=%.2f jolt=%.2f gd=%.2f ms" % [
+				pool.active_count(), pool.free_count(), phys, phys - gd, gd])
+			get_tree().quit(0)
+		return
 	if _smoke_mode == "loop":
 		# Фазовый челнок: цель спереди зависит от прогресса. Фаза 1 (ворота-1
 		# заперты): толкаем монеты на мат ворот-1 (z18, стоп В зоне). Фаза 2
