@@ -33,7 +33,7 @@ func setup(p_game: Node3D, def: EntityDef) -> void:
 	rotation.y = def.rotation_y
 	normal = Vector3(sin(def.rotation_y), 0, cos(def.rotation_y))
 	right = Vector3(cos(def.rotation_y), 0, -sin(def.rotation_y))
-	side.resize(CFG.COIN_N)
+	side.resize(game.pool.size)  # по факт. размеру пула (не константе) — работает под --coins=N
 	side.fill(0)
 	game.side_resetters.append(func(idx: int) -> void: side[idx] = 0)
 
@@ -198,8 +198,7 @@ func _step_active() -> void:
 			if copy == null:
 				break
 			copy.worth = w
-			for cb in game.side_resetters:
-				cb.call(copy.idx)  # копия: чистая регистрация, без срабатывания
+			# side[copy.idx] уже обнулён в pool.spawn() (spawn_resetters) → копия не множится
 			copy.linear_velocity = Vector3(
 				normal.x * vf + right.x * vl,
 				0.4 + game.rnd() * 0.9,

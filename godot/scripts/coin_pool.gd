@@ -8,6 +8,12 @@ const COIN_SCENE := preload("res://scenes/coin.tscn")
 
 var size := 0
 
+# Сброс эдж-триггеров сущностей (ворота side[]) для свежеспавненной монеты:
+# spawn в произвольной точке (гидрация B1, докидка) не должен тащить stale
+# side[idx] от прошлой жизни слота → фантомное умножение ворот. Прокидывает
+# game (= game.side_resetters, та же ссылка-массив). См. план B0.
+var spawn_resetters: Array[Callable] = []
+
 var _free: Array[RigidBody3D] = []
 
 
@@ -41,6 +47,8 @@ func spawn(pos: Vector3, random_tilt := true) -> RigidBody3D:
 	coin.angular_velocity = Vector3.ZERO
 	coin.dormant = false     # O3: свежая монета — активная (dynamic)
 	coin._refresh_monitor()  # O5: свежеспавненная монета активна → монитор контактов on
+	for cb in spawn_resetters:
+		cb.call(coin.idx)    # чистый эдж-триггер ворот для этого слота (анти-фантом)
 	return coin
 
 

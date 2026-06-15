@@ -114,6 +114,7 @@ func _ready() -> void:
 	pool.name = "Coins"
 	add_child(pool)
 	pool.setup(_pool_size_override if _pool_size_override > 0 else CFG.COIN_N, _on_coin_clink)
+	pool.spawn_resetters = side_resetters  # spawn() чистит stale side[] (ворота добавят сброс ниже, та же ссылка)
 	_build_coin_multimesh()  # общий рендер всех монет одним MultiMesh
 	_build_gold_field()      # шаг 3: визуальное золото сверх физ-пула (кнопка «+5000»)
 	_build_entities()
@@ -1082,7 +1083,7 @@ func _smoke_tick() -> void:
 	elif _smoke_mode == "gatefill":
 		if _smoke_ticks >= 900:  # 15 c
 			var g := gates[0]
-			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			var books := pool.active_count() + pool.free_count() == pool.size
 			var ok: bool = g.active and bank >= 10.0 and books
 			print("SMOKE %s: gate1_active=%s fill=%.0f bank=%.0f active=%d books=%s" %
 				["OK" if ok else "FAIL", g.active, g.fill, bank, pool.active_count(), books])
@@ -1141,14 +1142,14 @@ func _smoke_tick() -> void:
 			for o in obstacles:
 				if not o.post:
 					stand_gone = false
-			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			var books := pool.active_count() + pool.free_count() == pool.size
 			var ok := bh_ok and pad_gone and stand_gone and books and bank >= 120.0
 			print("SMOKE %s: blade_half=%.1f pad_gone=%s stand_gone=%s bank=%.0f books=%s" %
 				["OK" if ok else "FAIL", up_blade_half, pad_gone, stand_gone, bank, books])
 			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "trash":
 		if _smoke_ticks >= 240:  # 4 c
-			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			var books := pool.active_count() + pool.free_count() == pool.size
 			# 8 сгорели без банка; активны только 5 стартовых у источника
 			var ok := bank == 0.0 and pool.active_count() == 5 and books
 			print("SMOKE %s: bank=%.0f active=%d books=%s" %
@@ -1163,7 +1164,7 @@ func _smoke_tick() -> void:
 					continue  # O3: dormant-монеты (статик, но в игре) считаем
 				total_worth += coin.worth
 				n_active += 1
-			var books := pool.active_count() + pool.free_count() == CFG.COIN_N
+			var books := pool.active_count() + pool.free_count() == pool.size
 			var ok := total_worth == 10 and n_active == 10 and books
 			print("SMOKE %s: worth_sum=%d active=%d books=%s" %
 				["OK" if ok else "FAIL", total_worth, n_active, books])
