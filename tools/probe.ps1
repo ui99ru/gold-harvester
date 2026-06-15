@@ -81,7 +81,7 @@ Info "device: $model (Android $andr, $size) GPU: $gpu"
 
 # --- 5. чистый logcat + чистая папка телеметрии + запуск ----------------------
 & $Adb shell am force-stop $Pkg *> $null
-& $Adb shell run-as $Pkg sh -c 'rm -f files/telemetry/*' *> $null  # newest = только этот прогон
+& $Adb shell run-as $Pkg sh -c 'rm -rf files/telemetry' *> $null  # newest = только этот прогон (игра пересоздаст каталог)
 & $Adb logcat -c *> $null
 Info "запуск probe (baked --probe-s, таймаут $($DurationS + 60)s)…"
 & $Adb shell am start -n $Act *> $null

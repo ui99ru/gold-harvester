@@ -19,7 +19,8 @@ var tick_cb := Callable()    # -> float: gd_ms за тик (O(1)); зовётс�
 var _active := false
 var _scenario := ""
 var _seed := 0
-var _max_ticks := 0
+var _duration_s := 0.0   # длительность прогона в РЕАЛЬНЫХ секундах (не тиках — на
+                         # медленном телефоне тик-счёт раздувает wall-time, тайм-аут хоста)
 var _tick := 0
 var _t0_unix := 0.0
 
@@ -48,15 +49,15 @@ func _ready() -> void:
 
 
 ## Старт прогона. Зовёт game.gd при --probe после постройки сцены.
-func begin(scenario: String, seed_value: int, max_ticks: int) -> void:
+func begin(scenario: String, seed_value: int, duration_s: float) -> void:
 	_scenario = scenario
 	_seed = seed_value
-	_max_ticks = max_ticks
+	_duration_s = duration_s
 	_node_count_start = int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
 	_t0_unix = Time.get_unix_time_from_system()
 	_reset_window()
 	_active = true
-	print("@TLM_BEGIN scenario=%s seed=%d max_ticks=%d" % [scenario, seed_value, max_ticks])
+	print("@TLM_BEGIN scenario=%s seed=%d duration_s=%.0f" % [scenario, seed_value, duration_s])
 
 
 func _physics_process(_delta: float) -> void:
@@ -72,7 +73,7 @@ func _physics_process(_delta: float) -> void:
 	_win_ticks += 1
 	if tick_cb.is_valid():
 		_win_gd_accum += tick_cb.call()  # O(1): _sim_us_last/1000
-	if _tick >= _max_ticks:
+	if Time.get_unix_time_from_system() - _t0_unix >= _duration_s:
 		finish()
 
 

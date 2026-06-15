@@ -74,13 +74,17 @@ var _max_spawn_burst := 0
 var _loop_dir := 1
 var _loop_laps := 0
 var _loop_nodes0 := 0
+var _hydrate_total := 0   # B1: всего гидраций за прогон (диагностика + смоук)
+var _hydrate_seeded := 0  # B1 smoke-hydrate: сколько dormant засеяно
+var _smoke_gd_max := 0    # B1 smoke-evac: макс мкс GDScript-сима за тик (кап спайка)
 var _pool_size_override := 0
 var _probe := false        # авто-телеметрия (--probe): loop-автопилот + Telemetry
-var _probe_ticks := 7200   # длительность авто-прогона: 120 с × 60 тик/с (--probe-s= меняет)
+var _probe_s := 120.0      # длительность авто-прогона в РЕАЛЬНЫХ секундах (--probe-s=)
+var _probe_seed := 0       # B1: засеять N dormant-монет в probe (изобилие; --probe-seed=N)
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
 var _coin_mm: MultiMeshInstance3D   # общий рендер монет (как web InstancedMesh), инстанс = coin.idx
-var _gold_mm: MultiMeshInstance3D   # шаг 3: визуальное золото сверх физ-пула (без физики)
+var _dormant: CoinDormant   # B1: декор-слой монет без физ-тел (изобилие); гидра/дегидра у дозера
 # Скрытый инстанс MultiMesh: крошечный масштаб + далеко (вырождается → не рисуется).
 var _HIDDEN_XF := Transform3D(
 	Basis(Vector3(0.0001, 0, 0), Vector3(0, 0.0001, 0), Vector3(0, 0, 0.0001)),
@@ -116,7 +120,7 @@ func _ready() -> void:
 	pool.setup(_pool_size_override if _pool_size_override > 0 else CFG.COIN_N, _on_coin_clink)
 	pool.spawn_resetters = side_resetters  # spawn() чистит stale side[] (ворота добавят сброс ниже, та же ссылка)
 	_build_coin_multimesh()  # общий рендер всех монет одним MultiMesh
-	_build_gold_field()      # шаг 3: визуальное золото сверх физ-пула (кнопка «+5000»)
+	_build_dormant_field()   # B1: декор-слой dormant-монет (изобилие без физ-тел)
 	_build_entities()
 	_build_bank_ui()
 	for i in level.start_coins:
@@ -252,10 +256,10 @@ func _build_hud_and_menu() -> void:
 		mute.text = "🔇" if audio.toggle_mute() else "🔊")
 	layer.add_child(mute)
 
-	# Шаг 3: кнопка докидывать ВИЗУАЛЬНОЕ золото (MultiMesh, без физики) — ищем
-	# потолок рендера прямо на телефоне: жми и смотри FPS.
+	# B1: кнопка засеять dormant-монеты (декор без физики) — изобилие на экране.
+	# Гидрируются в тела по подъезду дозера; на телефоне смотрим FPS/draw_calls.
 	var gold_btn := Button.new()
-	gold_btn.text = "+5000 золота"
+	gold_btn.text = "+2000 золота"
 	gold_btn.add_theme_font_size_override("font_size", 26)
 	gold_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	gold_btn.offset_left = -250
@@ -263,15 +267,13 @@ func _build_hud_and_menu() -> void:
 	gold_btn.offset_right = -16
 	gold_btn.offset_bottom = 144
 	gold_btn.pressed.connect(func() -> void:
-		if _gold_mm:
-			var gm := _gold_mm.multimesh
-			gm.visible_instance_count = mini(gm.instance_count, gm.visible_instance_count + 5000))
+		seed_dormant(2000))
 	layer.add_child(gold_btn)
 
 	# Performance HUD + тумблеры тюнинга (петля «десктоп + прокси телефона»)
 	var hud := preload("res://scripts/performance_hud.gd").new()
-	hud.pool_stats_cb = func() -> Vector2i:
-		return Vector2i(pool.active_count(), pool.free_count())
+	hud.pool_stats_cb = func() -> Vector3i:
+		return Vector3i(pool.active_count(), pool.free_count(), _dormant.count() if _dormant else 0)
 	hud.spawn_50_cb = func() -> void:
 		for i in 50:
 			place_at_source(pool.spawn(Vector3.ZERO, false))
@@ -407,9 +409,11 @@ func _parse_user_args() -> void:
 				rng_sim.seed = 7
 				rng_vis.seed = 7 ^ 0x9e3779b9
 			if arg.begins_with("--probe-s="):
-				_probe_ticks = int(float(arg.get_slice("=", 1)) * 60.0)
+				_probe_s = float(arg.get_slice("=", 1))  # реальные секунды (не тики)
 		elif arg.begins_with("--probe-coins="):
 			_pool_size_override = int(arg.get_slice("=", 1))
+		elif arg.begins_with("--probe-seed="):
+			_probe_seed = int(arg.get_slice("=", 1))  # B1: засев dormant-изобилия
 		elif arg.begins_with("--cal="):
 			var c := arg.get_slice("=", 1).split(",")
 			_cal_sun = float(c[0])
@@ -449,10 +453,12 @@ func _start_probe() -> void:
 			"active": pool.active_count(),
 			"free": pool.free_count(),
 			"dormant": dorm,
-			"vis_gold": _gold_mm.multimesh.visible_instance_count if _gold_mm else 0,
+			"vis_gold": _dormant.count() if _dormant else 0,  # декор-монеты dormant-слоя
 			"cap": -1,  # AIMD-бюджет (этап B2) экспонирует сюда game.cap
 		}
-	Telemetry.begin("loop", int(rng_sim.seed), _probe_ticks)
+	if _probe_seed > 0:
+		seed_dormant(_probe_seed)  # B1: изобилие на экране для замера гидра/рендера
+	Telemetry.begin("loop", int(rng_sim.seed), _probe_s)
 
 
 func rnd() -> float:
@@ -778,6 +784,9 @@ func sim_step(dt: float) -> void:
 		var ring_lim2 := (rr - 0.8) * (rr - 0.8) if rr > 0.0 else 0.0
 		var rcx := level.ring_center.x
 		var rcz := level.ring_center.z
+		var r_out := CFG.HYDRATE_R + CFG.DEHYDRATE_MARGIN
+		var r_out2 := r_out * r_out          # дальше R_out спящее тело → dormant-слой
+		var dehy_budget := CFG.DEHYDRATE_PASS_BUDGET
 		for coin in pool.get_children():
 			if coin.get_meta("in_pool", false):
 				continue  # запаркованные пулом
@@ -791,6 +800,15 @@ func sim_step(dt: float) -> void:
 					continue
 			var dx := p.x - dz.x
 			var dzz := p.z - dz.z
+			# B1 ДЕГИДРАЦИЯ: осевшее (sleeping) тело дальше R_out → запись в dormant-
+			# слой, тело освобождается в пул. Только sleeping → поза восстановится
+			# побитово при гидрации (без «вздрагивания»). add()=-1 при полном слое —
+			# worth слит в соседа, тело всё равно убираем (изобилие не теряет ценность).
+			if dehy_budget > 0 and coin.sleeping and dx * dx + dzz * dzz > r_out2:
+				_dormant.add(coin.global_transform, coin.worth)
+				pool.release(coin)
+				dehy_budget -= 1
+				continue
 			var lz := dx * sn2 + dzz * cs2   # вдоль курса (вперёд +)
 			var lat := dx * cs2 - dzz * sn2  # вбок
 			if coin.dormant:
@@ -799,6 +817,8 @@ func sim_step(dt: float) -> void:
 			elif p.y < 0.6 and coin.linear_velocity.length_squared() < 1.0:
 				if lz < -4.5 or lz > 7.5 or absf(lat) > bw + 3.2:
 					coin.make_dormant()      # осела вне зоны (с запасом) → спим
+	# B1 ГИДРАЦИЯ (каждый тик, анти нож-призрак): dormant-записи у дозера → тела
+	_hydrate_pass()
 	# Экономика (web stepEconomy; физика монет шагает движком после)
 	for gt in gates:
 		gt.step(dt)
@@ -956,14 +976,17 @@ func _setup_smoke() -> void:
 		# 2·radius=0.8) в малом объёме -> глубокое проникновение -> взрыв
 		# контактов. Проверяем: пробивает ли буфер 40960 -> fallback-аллокатор
 		# Jolt (hard-столл) и какой при этом пик тика.
+		# Куча СБОКУ (x≈20, открытый грунт внутри кольца, без стен), дозер рядом
+		# (в рабочей зоне) — иначе B1-дегидрация усыпит далёкую кучу в dormant и
+		# тест контактов выродится (active=0). Рядом, но с зазором — не толкает.
 		var n := 0
 		for i in 800:
 			var cc := pool.spawn(Vector3(
-				-1.2 + 0.3 * (n % 9),
+				18.8 + 0.3 * (n % 9),
 				0.1 + 0.3 * floorf(n / 90.0),
 				8.0 + 0.3 * (floori(n / 9.0) % 10)), false)
 			n += 1
-		dozer.position = Vector3(20, 0, 30)  # дозер далеко, не мешает
+		dozer.position = Vector3(20, 0, 4)  # рядом с кучей → монеты не дегидрируют
 	elif _smoke_mode == "bucket":
 		# Чистое репро лага «монеты в ковше» (БЕЗ ворот): куча у источника,
 		# дозер возит её челноком в зоне z∈[4,14], не доезжая до мата ворот
@@ -978,6 +1001,41 @@ func _setup_smoke() -> void:
 			n += 1
 		dozer.position = Vector3(0, 0, 4)
 		_script_target = Vector3(0, 0, 13)
+	elif _smoke_mode == "hydrate":
+		# B1: куча dormant-монет; дозер проезжает сквозь — записи гидрируются в тела.
+		# Проверяем гидрацию, СОХРАНЕНИЕ worth и отсутствие dormant в следе ножа.
+		# Сцена СБОКУ (x≈20, внутри кольца r=32), вдали от ворот/падов/стен (центр
+		# z=20/40, x≈0) — чистая изоляция от экономики (иначе ворота множат worth).
+		for coin in pool.get_children():
+			if not coin.freeze:
+				pool.release(coin)  # убрать 5 стартовых — чистый учёт worth
+		_hydrate_seeded = 0
+		for i in 150:
+			var bx := 17.5 + 0.5 * (i % 11)
+			var bz := 8.0 + 0.5 * floorf(i / 11.0)
+			if _dormant.add(Transform3D(Basis(), Vector3(bx, 0.1, bz)), 1) >= 0:
+				_hydrate_seeded += 1
+		dozer.position = Vector3(20, 0, 6)
+		_script_target = Vector3(20, 0, 16)
+	elif _smoke_mode == "evac":
+		# B1: пул НАСЫЩЕН дальними спящими телами (x≈-20), а dormant-куча В ЯДРЕ у
+		# дозера (x≈20) требует тел при пустом пуле → путь эвакуации. Проверяем
+		# сохранение worth и ОТСУТСТВИЕ спайка (раньше эвакуация была O(pool)/кандидат).
+		for coin in pool.get_children():
+			if not coin.freeze:
+				pool.release(coin)
+		var far := pool.free_count()  # забить пул целиком дальними телами
+		for i in far:
+			pool.spawn(Vector3(-24.0 + 0.5 * (i % 20), 0.1, 28.0 + 0.5 * floorf(i / 20.0)), false)
+		_hydrate_seeded = 0
+		for i in 250:  # плотная dormant-куча в ядре (> бюджета и пула рядом)
+			var bx := 18.0 + 0.4 * (i % 10)
+			var bz := 7.0 + 0.4 * floorf(i / 10.0)
+			if _dormant.add(Transform3D(Basis(), Vector3(bx, 0.1, bz)), 1) >= 0:
+				_hydrate_seeded += 1
+		_smoke_gd_max = 0
+		dozer.position = Vector3(20, 0, 5)
+		_script_target = Vector3(20, 0, 13)
 
 
 func _descendants(n: Node) -> int:
@@ -1118,6 +1176,44 @@ func _smoke_tick() -> void:
 			var avg_ms := 1000.0 * _phys_accum / 600.0
 			print("SMOKE bucket: avg_physics=%.2f ms (≈телефон %.1f ms)" % [avg_ms, avg_ms * 8.0])
 			get_tree().quit(0)
+	elif _smoke_mode == "hydrate":
+		# Каждый тик в зоне кучи: dormant в следе ножа = нож-призрак (гидрация
+		# упреждающая → должно быть ~0). Копим тики-нарушения.
+		if dozer.position.z > 5.0 and dozer.position.z < 16.0:
+			var fwd := Vector3(sin(heading), 0, cos(heading))
+			var bc := dozer.position + fwd * up_reach
+			if _dormant.query_circle(bc, dozer.blade_hx() + 0.3).size() > 0:
+				_smoke_violations += 1
+		if _smoke_ticks >= 480:  # 8 c
+			var active_worth := 0
+			for coin in pool.get_children():
+				if not coin.get_meta("in_pool", false):
+					active_worth += coin.worth
+			# Инвариант: ничего не потеряно/задвоено через гидра/дегидра+swap-remove
+			var worth_ok := active_worth + _dormant.total_worth() == _hydrate_seeded
+			var ok := _hydrate_total > 0 and worth_ok and _smoke_violations <= 2
+			print("SMOKE hydrate: %s hydrated=%d seeded=%d worth=%d+%d=%d ghost_ticks=%d" %
+				["OK" if ok else "FAIL", _hydrate_total, _hydrate_seeded, active_worth,
+				_dormant.total_worth(), active_worth + _dormant.total_worth(), _smoke_violations])
+			get_tree().quit(0 if ok else 1)
+		return
+	elif _smoke_mode == "evac":
+		if _sim_us_last > _smoke_gd_max:
+			_smoke_gd_max = _sim_us_last  # макс GDScript-сим/тик (ловит O(pool)-спайк эвакуации)
+		if _smoke_ticks >= 300:  # 5 c (дальние тела успели уснуть → эвакуируемы)
+			var active_worth := 0
+			for coin in pool.get_children():
+				if not coin.get_meta("in_pool", false):
+					active_worth += coin.worth
+			var total := active_worth + _dormant.total_worth()
+			var expect := pool.size + _hydrate_seeded  # дальние тела + засев в ядре
+			var gd_ms := _smoke_gd_max / 1000.0
+			# worth сохранён сквозь эвакуацию; спайк ограничен (раньше O(pool)/кандидат)
+			var ok := total == expect and _hydrate_total > 0 and gd_ms < 15.0
+			print("SMOKE evac: %s total=%d expect=%d hydrated=%d max_gd=%.1f ms" %
+				["OK" if ok else "FAIL", total, expect, _hydrate_total, gd_ms])
+			get_tree().quit(0 if ok else 1)
+		return
 	elif _smoke_mode == "stress":
 		# Замер ОСЕВШЕЙ кучи: усредняем только последние 5 c (ticks 600..900),
 		# исключая взрыв спавна. Свип размера: ++ --coins=N --smoke-stress.
@@ -1150,24 +1246,28 @@ func _smoke_tick() -> void:
 	elif _smoke_mode == "trash":
 		if _smoke_ticks >= 240:  # 4 c
 			var books := pool.active_count() + pool.free_count() == pool.size
-			# 8 сгорели без банка; активны только 5 стартовых у источника
-			var ok := bank == 0.0 and pool.active_count() == 5 and books
-			print("SMOKE %s: bank=%.0f active=%d books=%s" %
-				["OK" if ok else "FAIL", bank, pool.active_count(), books])
+			# 8 сгорели без банка; 5 стартовых целы (B1: часть могла уйти в dormant
+			# вдали от дозера — считаем active+dormant).
+			var survivors := pool.active_count() + _dormant.count()
+			var ok := bank == 0.0 and survivors == 5 and books
+			print("SMOKE %s: bank=%.0f active=%d dormant=%d survivors=%d books=%s" %
+				["OK" if ok else "FAIL", bank, pool.active_count(), _dormant.count(), survivors, books])
 			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "wave":
 		if _smoke_ticks >= 360:  # 6 c: волна + парковка в створе (анти-фарм)
-			var total_worth := 0
-			var n_active := 0
+			# B1: копии у ворот (вдали от дозера) могут уйти в dormant — worth-
+			# инвариант держим по active+dormant (сумма ценности ровно ×10).
+			var total_worth := _dormant.total_worth()
+			var n_total := _dormant.count()
 			for coin in pool.get_children():
 				if coin.get_meta("in_pool", false):
-					continue  # O3: dormant-монеты (статик, но в игре) считаем
+					continue
 				total_worth += coin.worth
-				n_active += 1
+				n_total += 1
 			var books := pool.active_count() + pool.free_count() == pool.size
-			var ok := total_worth == 10 and n_active == 10 and books
-			print("SMOKE %s: worth_sum=%d active=%d books=%s" %
-				["OK" if ok else "FAIL", total_worth, n_active, books])
+			var ok := total_worth == 10 and n_total == 10 and books
+			print("SMOKE %s: worth_sum=%d count(act+dorm)=%d books=%s" %
+				["OK" if ok else "FAIL", total_worth, n_total, books])
 			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "push":
 		if _smoke_ticks >= 600:  # 10 c
@@ -1207,30 +1307,140 @@ func _build_coin_multimesh() -> void:
 	add_child(_coin_mm)
 
 
-## Шаг 3: «море золота» — визуальные монеты сверх физ-пула (без физ-тел), один
-## MultiMesh. Преаллокация 50k инстансов (разбросаны ковром по арене, лежат
-## плашмя), visible_instance_count=0; кнопка «+5000 золота» крутит видимое число
-## — так на телефоне ищем потолок рендера. Физики у них ноль. rndv → не трогает сим.
-func _build_gold_field() -> void:
-	var cap := 50000
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = Coin._mesh
-	mm.instance_count = cap
+## B1: dormant-слой — декор-монеты без физ-тел (изобилие). Пустой на старте;
+## наполняется дегидрацией осевших дальних монет и кнопкой seed_dormant().
+func _build_dormant_field() -> void:
+	_dormant = CoinDormant.new()
+	_dormant.name = "DormantField"
+	# custom_aabb на весь уровень (кольцо + коридор до z≈72): без пересчёта AABB.
+	var r: float = level.ring_radius if level.ring_radius > 0.0 else 60.0
+	var ctr := level.ring_center
+	var aabb := AABB(Vector3(ctr.x - r - 5, -2, ctr.z - r - 5),
+		Vector3(2 * r + 10, 12, 2 * r + 90))
+	add_child(_dormant)
+	_dormant.setup(CFG.DORMANT_MAX, aabb)
+
+
+## Засеять n декор-монет (worth=1) ковром по арене — изобилие на экране. Лежат
+## плашмя у земли; гидрируются в тела по подъезду дозера. rndv → не трогает сим.
+func seed_dormant(n: int) -> void:
+	if _dormant == null:
+		return
 	var r_max: float = level.ring_radius * 0.9 if level.ring_radius > 0.0 else 40.0
 	var ctr := level.ring_center
-	for i in cap:
+	for i in n:
 		var a := rndv() * TAU
 		var rr := sqrt(rndv()) * r_max
 		var b := Basis.from_euler(Vector3((rndv() - 0.5) * 0.5, rndv() * TAU, (rndv() - 0.5) * 0.5))
-		mm.set_instance_transform(i, Transform3D(b, Vector3(
-			ctr.x + cos(a) * rr, 0.03 + rndv() * 0.14, ctr.z + sin(a) * rr)))
-	mm.visible_instance_count = 0
-	_gold_mm = MultiMeshInstance3D.new()
-	_gold_mm.name = "GoldField"
-	_gold_mm.multimesh = mm
-	_gold_mm.material_override = Coin._material
-	add_child(_gold_mm)
+		var xf := Transform3D(b, Vector3(
+			ctr.x + cos(a) * rr, 0.03 + rndv() * 0.14, ctr.z + sin(a) * rr))
+		if _dormant.add(xf, 1) < 0:
+			break  # слой полон
+
+
+## B1 ГИДРАЦИЯ: dormant-записи в радиусе HYDRATE_R вокруг смещённого центра →
+## поднимаем тела из пула, бюджет HYDRATE_TICK_BUDGET/тик. Сортировка ближних-
+## первыми (анти нож-призрак) — ТОЛЬКО при дефиците бюджета (иначе порядок неважен,
+## экономим сортировку/аллокации на горячем пути). При пустом пуле ЯДРО (≤CORE_R)
+## гидрируется безусловно за счёт эвакуации дальних спящих тел: список строим ОДИН
+## раз/тик (не O(pool) на кандидата) + кап EVACUATE_TICK_BUDGET. Удаляем записи
+## ПОСЛЕ всех чтений по убыванию индекса (swap-remove в CoinDormant двигает индексы).
+func _hydrate_pass() -> void:
+	if _dormant == null or _dormant.count() == 0:
+		return
+	var fwd := Vector3(sin(heading), 0, cos(heading))
+	var center := dozer.position + fwd * (speed_now * 0.35)  # упреждение по движению
+	var idxs := _dormant.query_circle(center, CFG.HYDRATE_R)
+	var n := idxs.size()
+	if n == 0:
+		return
+	var budget := CFG.HYDRATE_TICK_BUDGET
+	var order := idxs
+	if n > budget:  # порядок (ближние первыми) нужен только когда не всё влезает
+		var cand: Array = []
+		cand.resize(n)
+		for k in n:
+			var i := idxs[k]
+			var q: Vector3 = _dormant.get_xform(i).origin
+			var dx := q.x - dozer.position.x
+			var dz := q.z - dozer.position.z
+			cand[k] = [dx * dx + dz * dz, i]
+		cand.sort_custom(_cmp_pair)
+		order = PackedInt32Array()
+		order.resize(n)
+		for k in n:
+			order[k] = cand[k][1]
+	var core_r2 := CFG.HYDRATE_CORE_R * CFG.HYDRATE_CORE_R
+	var evac_budget := CFG.EVACUATE_TICK_BUDGET
+	var evac: Array = []
+	var evac_built := false
+	var to_remove := PackedInt32Array()
+	for k in order.size():
+		if budget <= 0:
+			break
+		var i := order[k]
+		var xf := _dormant.get_xform(i)
+		var c: RigidBody3D = pool.spawn(xf.origin, false)
+		if c == null:
+			# Пул пуст. ЯДРО (у ножа) — безусловно: эвакуируем дальнее спящее тело
+			# (вне HYDRATE_R от центра, не «своё»). Вне ядра — пропуск (не нож-призрак).
+			var dx := xf.origin.x - dozer.position.x
+			var dz := xf.origin.z - dozer.position.z
+			if dx * dx + dz * dz <= core_r2 and evac_budget > 0:
+				if not evac_built:
+					evac = _build_evac_list(center)
+					evac_built = true
+				c = _evac_pop(evac)
+				if c != null:
+					evac_budget -= 1
+			if c == null:
+				break
+		c.transform = xf
+		c.worth = _dormant.get_worth(i)
+		c.sleeping = true
+		to_remove.append(i)
+		_hydrate_total += 1
+		budget -= 1
+	to_remove.sort()  # нативный sort PackedInt32Array; удаляем с конца (по убыванию)
+	var j := to_remove.size() - 1
+	while j >= 0:
+		_dormant.remove(to_remove[j])
+		j -= 1
+
+
+static func _cmp_pair(a: Array, b: Array) -> bool:
+	return a[0] < b[0]
+
+
+## Дальние спящие тела ВНЕ HYDRATE_R от центра (анти-трэш: не выселяем тело внутри
+## круга гидрации), по возрастанию d2 → pop_back = самое дальнее. Строим ОДИН раз/тик.
+func _build_evac_list(center: Vector3) -> Array:
+	var hr2 := CFG.HYDRATE_R * CFG.HYDRATE_R
+	var lst: Array = []
+	for coin in pool.get_children():
+		if coin.get_meta("in_pool", false) or not coin.sleeping:
+			continue
+		var p: Vector3 = coin.global_position
+		var dx := p.x - center.x
+		var dz := p.z - center.z
+		var d2 := dx * dx + dz * dz
+		if d2 > hr2:
+			lst.append([d2, coin])
+	lst.sort_custom(_cmp_pair)
+	return lst
+
+
+## Снять дальнее спящее тело: дегидрировать (worth → слой) и вернуть свежеспавненным.
+func _evac_pop(lst: Array) -> RigidBody3D:
+	while not lst.is_empty():
+		var pair: Array = lst.pop_back()  # самое дальнее
+		var coin: RigidBody3D = pair[1]
+		if coin.get_meta("in_pool", false):
+			continue  # уже занято/освобождено — пропустить
+		_dormant.add(coin.global_transform, coin.worth)
+		pool.release(coin)
+		return pool.spawn(Vector3.ZERO, false)
+	return null
 
 
 ## Рендер всех монет одним MultiMesh (порт web syncCoins/InstancedMesh): каждый
