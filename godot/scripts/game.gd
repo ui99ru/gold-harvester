@@ -273,11 +273,11 @@ func _build_hud_and_menu() -> void:
 	hud.gd_time_cb = func() -> float:
 		return _sim_us_last / 1000.0  # мс GDScript-сима за последний физ-тик
 	hud.toggles = [
-		["Тени", true, func(on: bool) -> void:
+		["Тени", false, func(on: bool) -> void:
 			sun.shadow_enabled = on],
 		["Тики 50", false, func(on: bool) -> void:
 			Engine.physics_ticks_per_second = 50 if on else 60],
-		["MSAA 2x", true, func(on: bool) -> void:
+		["MSAA 2x", false, func(on: bool) -> void:
 			get_viewport().msaa_3d = Viewport.MSAA_2X if on else Viewport.MSAA_DISABLED],
 		["Glow", true, func(on: bool) -> void:
 			world_env.glow_enabled = on],
@@ -466,7 +466,7 @@ func _build_environment() -> void:
 	sun = DirectionalLight3D.new()
 	sun.light_color = Color("fff4de")
 	sun.light_energy = CFG.SUN_INT * 0.30 * _cal_sun  # калибровка по web-эталону
-	sun.shadow_enabled = true
+	sun.shadow_enabled = false  # мобайл-дефолт: тени ~5 мс на этом GPU (тумблер «Тени» включает)
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	# web: позиция (10,22,6), смотрит в origin
 	sun.look_at_from_position(Vector3(10, 22, 6), Vector3.ZERO, Vector3.UP)
