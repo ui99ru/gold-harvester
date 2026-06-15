@@ -509,23 +509,30 @@ func _build_ground_and_rocks() -> void:
 	gbody.add_child(cs)
 	add_child(gbody)
 
-	# Кольцо скал — граница сцены (правка по рефу): плотная стена камней по
-	# окружности уровня + невидимый StaticBody-многоугольник держит монеты.
-	# Дозер клэмпится радиально в sim_step. Вне кольца — редкие дальние камни.
+	# Граница сцены: один полигональный «забор» (1 draw-call вместо ~100 скал) +
+	# невидимая стена-коллайдер держит монеты; дозер клэмпится радиально в sim_step.
 	var rock_mat := StandardMaterial3D.new()
 	rock_mat.albedo_color = Color("8f72c8")
 	rock_mat.roughness = 1.0
+	rock_mat.cull_mode = BaseMaterial3D.CULL_DISABLED  # стена видна изнутри арены
 	var rc := level.ring_center
 	var rr := level.ring_radius
 	if rr > 0.0:
-		for i in 80:  # плотное кольцо: ~0.08 рад между камнями, перекрываются
-			var a := (i / 80.0) * TAU + (rnd() - 0.5) * 0.05
-			var r := rr + 1.5 + rnd() * 3.0  # чуть снаружи барьера
-			# Южная дуга (между камерой и сценой) — низкий бордюр, не загораживает
-			var south := clampf(-sin(a), 0.0, 1.0)  # 1 на юге, 0 на севере
-			var s := lerpf(2.5 + rnd() * 4.0, 1.0 + rnd() * 0.8, south)
-			_add_rock(rock_mat, Vector3(rc.x + cos(a) * r, s * 0.4 - 0.5, rc.z + sin(a) * r), s)
-		# Невидимый барьер: 32 box-сегмента по хорде окружности
+		# Визуал — открытый цилиндр-многоугольник (32 грани) на радиусе кольца.
+		var fence := MeshInstance3D.new()
+		fence.name = "Fence"
+		var fmesh := CylinderMesh.new()
+		fmesh.top_radius = rr + 1.0
+		fmesh.bottom_radius = rr + 1.0
+		fmesh.height = 5.0
+		fmesh.radial_segments = 32
+		fmesh.cap_top = false
+		fmesh.cap_bottom = false
+		fence.mesh = fmesh
+		fence.material_override = rock_mat
+		fence.position = Vector3(rc.x, 2.0, rc.z)
+		add_child(fence)
+		# Невидимый барьер: 32 box-сегмента по хорде окружности (держит монеты)
 		var wall := StaticBody3D.new()
 		wall.name = "RingWall"
 		var pm_ring := PhysicsMaterial.new()
@@ -543,26 +550,6 @@ func _build_ground_and_rocks() -> void:
 			seg.position = Vector3(rc.x + cos(a) * rr, 1.5, rc.z + sin(a) * rr)
 			seg.rotation.y = -a + PI / 2.0  # хорда перпендикулярна радиусу
 			wall.add_child(seg)
-	# Дальние декоративные камни (как web, реже)
-	for i in 24:
-		var a := rnd() * 6.28
-		var r := 70.0 + rnd() * 35.0
-		var s := 3.0 + rnd() * 5.0
-		_add_rock(rock_mat, Vector3(cos(a) * r, s * 0.5 - 0.5, sin(a) * r), s)
-
-
-func _add_rock(mat: Material, pos: Vector3, s: float) -> void:
-	var m := MeshInstance3D.new()
-	var sph := SphereMesh.new()     # low-poly аналог DodecahedronGeometry
-	sph.radius = s
-	sph.height = s * 2.0
-	sph.radial_segments = 6
-	sph.rings = 3
-	m.mesh = sph
-	m.material_override = mat
-	m.position = pos
-	m.rotation = Vector3(rnd() * 3, rnd() * 3, rnd() * 3)
-	add_child(m)
 
 
 func _build_walls() -> void:
@@ -744,10 +731,21 @@ func sim_step(dt: float) -> void:
 		var sn2 := sin(heading)
 		var cs2 := cos(heading)
 		var bw := dozer.blade_hx()
+		var rr := level.ring_radius
+		var ring_lim2 := (rr - 0.8) * (rr - 0.8) if rr > 0.0 else 0.0
+		var rcx := level.ring_center.x
+		var rcz := level.ring_center.z
 		for coin in pool.get_children():
 			if coin.get_meta("in_pool", false):
 				continue  # запаркованные пулом
 			var p: Vector3 = coin.global_position
+			# Доехала до границы — возврат в источник (не «выковыривать» у стены)
+			if ring_lim2 > 0.0:
+				var ex := p.x - rcx
+				var ez := p.z - rcz
+				if ex * ex + ez * ez > ring_lim2:
+					place_at_source(coin)
+					continue
 			var dx := p.x - dz.x
 			var dzz := p.z - dz.z
 			var lz := dx * sn2 + dzz * cs2   # вдоль курса (вперёд +)
