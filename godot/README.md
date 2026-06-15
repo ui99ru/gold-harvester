@@ -94,6 +94,37 @@ adb install -r godot\build\zolotodozer-debug.apk
 `rendering/textures/vram_compression/import_etc2_astc=true` — без него
 Android-экспорт падает с **пустым** списком configuration errors.
 
+## Авто-телеметрия с телефона (probe)
+
+Реальные числа геймплея с устройства одной командой — без ручных скриншотов:
+
+```powershell
+pwsh tools/probe.ps1                 # собрать probe-APK → install → автопрогон → анализ
+pwsh tools/probe.ps1 -SkipBuild      # быстро: переиспользовать уже стоящий APK
+```
+
+Как устроено: пресет **Android-Probe** (`export_presets.cfg`, `[preset.1]`) запекает
+`command_line/extra_args="--probe-s=120"` → на старте `game.gd` армит автозагруз
+`Telemetry` (`scripts/telemetry.gd`) и гонит **loop-автопилот** (тот же `--smoke-loop`).
+Каждые 0.5 с в logcat летит строка `@TLM {…}` (пер-тик ПИК физики, frame/fps, gd/jolt
+split, draw_calls, node_count, active/dormant); в конце — `@TLM_SUMMARY` (p50/p95/p99/max,
+%вне-бюджета, leak) и авторитетный JSON в `user://telemetry/`. Хост-скрипт стримит
+logcat до `@TLM_DONE`, выкачивает JSON через `adb run-as` (debug-APK debuggable, доп.
+прав НЕ нужно), дозаполняет модель/GPU/экран и печатает вердикт. Копия — `out/telemetry/`.
+
+Грабли (проверено на устройстве):
+
+- intent-аргументы `am --es/--esa command_line_args` на Godot 4.4 Android **не доходят**
+  до `OS.get_cmdline_args()` — поэтому аргумент **запекается в пресет** (а `_parse_user_args`
+  читает объединённо user-args ∪ cmdline-args, чтобы работать и на десктопе, и на телефоне).
+- экран должен быть **включён** — иначе GodotFragment паузит GL-цикл и телеметрии нет
+  (скрипт делает `svc power stayon usb` + wakeup + dismiss-keyguard).
+- `Telemetry` спит без `--probe`/`--probe-s` — обычная игра и headless-смоуки не затронуты.
+
+Базлайн Redmi Note 8 Pro (Mali-G76, loop, 5 монет): frame p95 ≈ 53 мс (≈19 fps),
+physics p50 ≈ 12 мс — то, что прокси ×8 (только CPU) не предсказывал. Цель Части B
+(изобилие+AIMD-бюджет) — загнать frame в бюджет при тысячах видимых монет.
+
 ## CI
 
 `.github/workflows/build-android.yml`: пуш в `xp/godot` или тег `v*` →

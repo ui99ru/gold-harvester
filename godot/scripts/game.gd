@@ -75,6 +75,8 @@ var _loop_dir := 1
 var _loop_laps := 0
 var _loop_nodes0 := 0
 var _pool_size_override := 0
+var _probe := false        # авто-телеметрия (--probe): loop-автопилот + Telemetry
+var _probe_ticks := 7200   # длительность авто-прогона: 120 с × 60 тик/с (--probe-s= меняет)
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
 var _coin_mm: MultiMeshInstance3D   # общий рендер монет (как web InstancedMesh), инстанс = coin.idx
@@ -129,6 +131,8 @@ func _ready() -> void:
 		phase = "play"
 		_start_overlay.visible = false
 	_setup_smoke()
+	if _probe:
+		_start_probe()
 	_update_camera(0.0)
 
 
@@ -370,8 +374,13 @@ func _build_dozer() -> void:
 func _parse_user_args() -> void:
 	rng_sim.seed = 1
 	rng_vis.seed = 1 ^ 0x9e3779b9
+	# Десктоп отдаёт харнесс-флаги через ++ в get_cmdline_user_args(); Android
+	# (запечённый command_line/extra_args) — в get_cmdline_args(). Берём оба и
+	# фильтруем по нашим специфичным префиксам (--probe/--smoke-/--seed=/...).
+	var _args := OS.get_cmdline_user_args()
+	_args.append_array(OS.get_cmdline_args())
 	var seeded := false
-	for arg in OS.get_cmdline_user_args():
+	for arg in _args:
 		if arg.begins_with("--seed="):
 			var s := int(arg.get_slice("=", 1))
 			rng_sim.seed = s
@@ -387,6 +396,19 @@ func _parse_user_args() -> void:
 			test_mode = true
 			rng_sim.seed = 7
 			rng_vis.seed = 7 ^ 0x9e3779b9
+		elif arg == "--probe" or arg.begins_with("--probe-s="):
+			# Авто-прогон телеметрии: реалистичный loop-автопилот + Telemetry.
+			# Seed по умолчанию 7 (детерминизм), но --seed= раньше в строке побеждает.
+			_probe = true
+			_smoke_mode = "loop"
+			test_mode = true
+			if not seeded:
+				rng_sim.seed = 7
+				rng_vis.seed = 7 ^ 0x9e3779b9
+			if arg.begins_with("--probe-s="):
+				_probe_ticks = int(float(arg.get_slice("=", 1)) * 60.0)
+		elif arg.begins_with("--probe-coins="):
+			_pool_size_override = int(arg.get_slice("=", 1))
 		elif arg.begins_with("--cal="):
 			var c := arg.get_slice("=", 1).split(",")
 			_cal_sun = float(c[0])
@@ -403,13 +425,33 @@ func _parse_user_args() -> void:
 		rng_vis.randomize()
 
 	# --shot= обрабатывается после создания ShotTool в _ready
-	for arg in OS.get_cmdline_user_args():
+	for arg in _args:
 		if arg.begins_with("--shot="):
 			call_deferred("_request_shot", arg.trim_prefix("--shot="))
 
 
 func _request_shot(path: String) -> void:
 	shot.request(path, 30)
+
+
+## Авто-телеметрия (--probe): проводим провайдеры в Telemetry (как HUD-колбэки) и
+## стартуем прогон. Пер-тик gd_ms — O(1); dormant — O(N), берётся раз в окно.
+func _start_probe() -> void:
+	Telemetry.tick_cb = func() -> float:
+		return _sim_us_last / 1000.0
+	Telemetry.sample_cb = func() -> Dictionary:
+		var dorm := 0
+		for coin in pool.get_children():
+			if coin.dormant:
+				dorm += 1
+		return {
+			"active": pool.active_count(),
+			"free": pool.free_count(),
+			"dormant": dorm,
+			"vis_gold": _gold_mm.multimesh.visible_instance_count if _gold_mm else 0,
+			"cap": -1,  # AIMD-бюджет (этап B2) экспонирует сюда game.cap
+		}
+	Telemetry.begin("loop", int(rng_sim.seed), _probe_ticks)
 
 
 func rnd() -> float:
@@ -992,7 +1034,7 @@ func _smoke_tick() -> void:
 		if _smoke_ticks == 120:
 			_loop_nodes0 = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
 			_phys_max = 0.0  # сбросить пик после стартового спайка спавна
-		if _smoke_ticks >= 3600:  # 60 c
+		if not _probe and _smoke_ticks >= 3600:  # 60 c (в probe — терминацию ведёт Telemetry)
 			var nodes_now := Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
 			var leaked := nodes_now - _loop_nodes0
 			# Допуск: пул/частицы могут колебаться на десятки; утечка была +2/тик (~7000)
