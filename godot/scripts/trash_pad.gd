@@ -51,6 +51,9 @@ func step(dt: float) -> void:
 					"add": true, "vy": 1.8, "grav": 2.5,
 					"vx": (game.rndv() - 0.5) * 1.2, "vz": (game.rndv() - 0.5) * 1.2,
 					"fade": 0.85})
+	# B3: сжечь dormant-монеты, осевшие/уснувшие прямо в зоне трэша (без банка — утиль).
+	var dd: Dictionary = game.drain_dormant_rect(position, HALF, HALF)
+	cnt += int(dd["n"])
 	if cnt > 0:
 		game.clinks.clink(global_position, 0.5)
 		acc += cnt

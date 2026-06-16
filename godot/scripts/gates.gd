@@ -143,6 +143,15 @@ func step(_dt: float) -> void:
 			game.bank += v
 			cnt += 1
 			game.place_at_source(coin)
+	# B3: поглотить worth монет, осевших и уснувших прямо на мате (dormant-слой) — иначе
+	# их ценность застревает (live_snapshot их не видит). Мат = осевой прямоуг. с центром
+	# position - normal*1.6 (для невращённых ворот текущего уровня совпадает с along/lat-тестом).
+	var dd: Dictionary = game.drain_dormant_rect(position - normal * 1.6, 5.2, 1.7)
+	if int(dd["worth"]) > 0:
+		var dv: float = float(dd["worth"]) * game.up_mult
+		fill += dv
+		game.bank += dv
+		cnt += int(dd["n"])
 	if cnt > 0:
 		game.on_coins_absorbed(position, cnt)
 	if fill >= cost:

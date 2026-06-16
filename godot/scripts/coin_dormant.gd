@@ -121,6 +121,24 @@ func query_circle(center: Vector3, r: float) -> PackedInt32Array:
 	return out
 
 
+## B3: индексы записей в осевом прямоугольнике (центр ± полуразмеры) на XZ. Для зон
+## ворот/падов/трэша (поглощение worth монет, осевших и уснувших прямо в зоне).
+func query_rect(center: Vector3, hx: float, hz: float) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	var c0 := _cell(center - Vector3(hx, 0, hz))
+	var c1 := _cell(center + Vector3(hx, 0, hz))
+	for cx in range(c0.x, c1.x + 1):
+		for cz in range(c0.y, c1.y + 1):
+			var key := Vector2i(cx, cz)
+			if not _grid.has(key):
+				continue
+			for i in _grid[key]:
+				var p: Vector3 = _xforms[i].origin
+				if absf(p.x - center.x) <= hx and absf(p.z - center.z) <= hz:
+					out.append(i)
+	return out
+
+
 func _cell(p: Vector3) -> Vector2i:
 	return Vector2i(floori(p.x / CELL), floori(p.z / CELL))
 

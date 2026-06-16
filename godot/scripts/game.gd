@@ -91,6 +91,7 @@ var _loop_nodes0 := 0
 var _hydrate_total := 0   # B1: всего гидраций за прогон (диагностика + смоук)
 var _hydrate_seeded := 0  # B1 smoke-hydrate: сколько dormant засеяно
 var _smoke_gd_max := 0    # B1 smoke-evac: макс мкс GDScript-сима за тик (кап спайка)
+var _dorm_bank0 := 0      # B3 smoke-dormecon: банк до поглощения dormant в зоне пада
 var _pool_size_override := 0
 var _probe := false        # авто-телеметрия (--probe): loop-автопилот + Telemetry
 var _probe_s := 120.0      # длительность авто-прогона в РЕАЛЬНЫХ секундах (--probe-s=)
@@ -1114,7 +1115,15 @@ func _setup_smoke() -> void:
 		_cap_frozen = true
 		_cap_override = 150
 		cap = 150
-		seed_dormant(3000)
+		# B3: сеем dormant в ПОЛОСЕ дозера (x∈[13,21]) — вне матов сущностей (ворота x±5.2,
+		# пады/трэш x=±9 → мат до x≈11.4), иначе они дренят/жгут ковёр и ломают чистый
+		# worth-инвариант. Поглощение dormant сущностями отдельно проверяет --smoke-dormecon.
+		for i in 3000:
+			var px := 13.0 + rndv() * 8.0
+			var pz := 5.0 + rndv() * 17.0
+			var b := Basis.from_euler(Vector3((rndv() - 0.5) * 0.5, rndv() * TAU, (rndv() - 0.5) * 0.5))
+			if _dormant.add(Transform3D(b, Vector3(px, 0.03 + rndv() * 0.14, pz)), 1) < 0:
+				break
 		_hydrate_seeded = _dormant.count()
 		_active_prev = 0
 		dozer.position = Vector3(16, 0, 10)
@@ -1131,6 +1140,22 @@ func _setup_smoke() -> void:
 		dozer.position = Vector3(0, 0, 8)
 		_loop_dir = 1
 		_script_target = Vector3(0, 0, 18)
+	elif _smoke_mode == "dormecon":
+		# B3: worth монет, осевших/уснувших ПРЯМО в зоне пада, должен поглощаться из
+		# dormant-слоя (live_snapshot их не видит). Сеем пилу dormant В зоне пада, дозер
+		# далеко (нет гидрации зоны), без др. засева → пад обязан забрать весь worth.
+		for coin in pool.get_children():
+			if not coin.freeze:
+				pool.release(coin)
+		dozer.position = Vector3(0, 0, -12)
+		_dorm_bank0 = bank
+		_hydrate_seeded = 0
+		var pad := pads[0]
+		for i in 40:  # 40×worth1 = 40 < cost пада (не апгрейднется) и в пределах HALF=2.4
+			var px := pad.position.x + (rndv() - 0.5) * 3.0
+			var pz := pad.position.z + (rndv() - 0.5) * 3.0
+			if _dormant.add(Transform3D(Basis(), Vector3(px, 0.1, pz)), 1) >= 0:
+				_hydrate_seeded += 1
 
 
 func _descendants(n: Node) -> int:
@@ -1203,6 +1228,18 @@ func _smoke_tick() -> void:
 				0.001 * _prof["hydrate"] / n, 0.001 * _prof["entities"] / n,
 				0.001 * _prof["bankui"] / n, pool.active_count(), _dormant.count()])
 			get_tree().quit(0)
+		return
+	if _smoke_mode == "dormecon":
+		# B3: пад обязан поглотить весь dormant-worth своей зоны → банк/филл выросли на пилу,
+		# dormant очистился (нет «застрявшего» worth). up_mult=1 → bank_gain == пила.
+		if _smoke_ticks >= 5:
+			var bank_gain := bank - _dorm_bank0
+			var pad := pads[0]
+			var ok := _dormant.count() == 0 and bank_gain == _hydrate_seeded \
+				and absf(pad.fill - float(_hydrate_seeded) * up_mult) < 0.01
+			print("SMOKE dormecon: %s pile=%d bank_gain=%d fill=%.0f dormant_left=%d" % [
+				"OK" if ok else "FAIL", _hydrate_seeded, bank_gain, pad.fill, _dormant.count()])
+			get_tree().quit(0 if ok else 1)
 		return
 	if _smoke_mode == "idle":
 		# Сцена «как на телефоне»: старт (5 монет, 995 в пуле), дозер стоит.
@@ -1521,6 +1558,29 @@ func seed_dormant(n: int) -> void:
 			ctr.x + cos(a) * rr, 0.03 + rndv() * 0.14, ctr.z + sin(a) * rr))
 		if _dormant.add(xf, 1) < 0:
 			break  # слой полон
+
+
+## B3: поглотить dormant-записи в осевой зоне (центр ± hx/hz) и удалить их. Возврат
+## {"n": число, "worth": суммарный worth}. Чинит «застрявший» worth: монета, осевшая и
+## уснувшая прямо в зоне ворот/пада/трэша, дегидрируется в dormant-слой, и активный цикл
+## (live_snapshot) её больше не видит → без этого её ценность терялась навсегда.
+## В обычной игре dormant копится только из реальных монет (дегидрация), декор-ковёр в игре
+## не сеется — эксплойта «печать из декора» нет. ВАЖНО на будущее: если изобилие начнут
+## сеять в игре (seed_dormant в play), зоны сущностей надо исключать из засева.
+## Удаление пакетное по убыванию индекса (swap-remove в CoinDormant двигает индексы).
+func drain_dormant_rect(center: Vector3, hx: float, hz: float) -> Dictionary:
+	if _dormant == null or _dormant.count() == 0:
+		return {"n": 0, "worth": 0}
+	var idxs := _dormant.query_rect(center, hx, hz)
+	if idxs.is_empty():
+		return {"n": 0, "worth": 0}
+	var total := 0
+	for i in idxs:
+		total += _dormant.get_worth(i)
+	idxs.sort()
+	for j in range(idxs.size() - 1, -1, -1):
+		_dormant.remove(idxs[j])
+	return {"n": idxs.size(), "worth": total}
 
 
 ## B2: сколько ещё тел можно поднять под кэп (может быть <0, если active > cap).
