@@ -89,6 +89,12 @@ var _pool_size_override := 0
 var _probe := false        # авто-телеметрия (--probe): loop-автопилот + Telemetry
 var _probe_s := 120.0      # длительность авто-прогона в РЕАЛЬНЫХ секундах (--probe-s=)
 var _probe_seed := 0       # B1: засеять N dormant-монет в probe (изобилие; --probe-seed=N)
+# B6: probe-оверрайды рендера для замера на телефоне. НЕ меняют дефолты (тени/MSAA
+# уже однажды меняли «без согласования» и откатили) — только инструмент для A/B.
+var _ovr_msaa := -1        # --no-msaa → 0 (MSAA off); -1 = дефолт проекта (2x)
+var _ovr_shadow := -1      # --no-shadow → 0 (тень солнца off); -1 = дефолт (on)
+var _ovr_scale := 0.0      # --render-scale=X → scaling_3d_scale; 0 = дефолт (нативное)
+var _ovr_glow := -1        # --no-glow → 0 (bloom off); -1 = дефолт (on)
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
 var _coin_mm: MultiMeshInstance3D   # общий рендер монет (как web InstancedMesh), инстанс = coin.idx
@@ -145,9 +151,22 @@ func _ready() -> void:
 		phase = "play"
 		_start_overlay.visible = false
 	_setup_smoke()
+	_apply_render_overrides()  # B6 probe: viewport MSAA/render-scale (после HUD; дефолты не тронуты)
 	if _probe:
 		_start_probe()
 	_update_camera(0.0)
+
+
+## B6 probe-only: применить оверрайды рендера для A/B-замера на телефоне. Дефолты
+## проекта (MSAA 2x, нативный скейл) не меняем — это лишь инструмент измерения вклада
+## каждой полноэкранной/доппроходной статьи в кадр. Тень — в _build_environment.
+func _apply_render_overrides() -> void:
+	var vp := get_viewport()
+	if _ovr_msaa == 0:
+		vp.msaa_3d = Viewport.MSAA_DISABLED
+	if _ovr_scale > 0.0:
+		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		vp.scaling_3d_scale = _ovr_scale
 
 
 ## Респаун монеты в источнике: у земли + радиальный разлёт «волной». Монеты
@@ -426,6 +445,18 @@ func _parse_user_args() -> void:
 		elif arg.begins_with("--cap="):
 			_cap_override = int(arg.get_slice("=", 1))  # B2: заморозить AIMD-кэп (детерминизм)
 			_cap_frozen = true
+		elif arg.begins_with("--dormant-segs="):
+			Coin.dormant_lod_segs = int(arg.get_slice("=", 1))  # B6 A/B: сегменты LOD-меша декора
+		elif arg == "--dormant-hi":
+			Coin.dormant_mat_cheap = false  # B6 A/B: полный PBR на декоре (бейслайн замера рендера)
+		elif arg == "--no-msaa":
+			_ovr_msaa = 0   # B6 A/B: замер вклада MSAA в кадр на телефоне
+		elif arg == "--no-shadow":
+			_ovr_shadow = 0  # B6 A/B: замер вклада теней солнца
+		elif arg == "--no-glow":
+			_ovr_glow = 0    # B6 A/B: замер вклада bloom (работает и на Android — baked args)
+		elif arg.begins_with("--render-scale="):
+			_ovr_scale = float(arg.get_slice("=", 1))  # B6 A/B: рендер-скейл 3D (fill-rate)
 		elif arg.begins_with("--cal="):
 			var c := arg.get_slice("=", 1).split(",")
 			_cal_sun = float(c[0])
@@ -515,7 +546,7 @@ func _build_environment() -> void:
 	env.fog_depth_end = CFG.FOG_FAR
 
 	# Bloom web-пайплайна (bright-pass 0.86 + compose 0.38)
-	env.glow_enabled = not OS.get_cmdline_user_args().has("--no-glow")
+	env.glow_enabled = _ovr_glow != 0  # --no-glow (через парсер: и user-args, и baked Android)
 	env.glow_hdr_threshold = CFG.BLOOM_THR
 	env.glow_intensity = CFG.BLOOM_INTEN
 
@@ -527,7 +558,7 @@ func _build_environment() -> void:
 	sun = DirectionalLight3D.new()
 	sun.light_color = Color("fff4de")
 	sun.light_energy = CFG.SUN_INT * 0.30 * _cal_sun  # калибровка по web-эталону
-	sun.shadow_enabled = true
+	sun.shadow_enabled = _ovr_shadow != 0   # B6 probe: --no-shadow → off (замер)
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	# web: позиция (10,22,6), смотрит в origin
 	sun.look_at_from_position(Vector3(10, 22, 6), Vector3.ZERO, Vector3.UP)
@@ -1083,6 +1114,22 @@ func _smoke_tick() -> void:
 	var pm := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 	if pm > _phys_max:
 		_phys_max = pm
+	if _smoke_mode == "lod":
+		# B6 регресс: декор на дешёвом LOD-меше/материале, активный слой — полный.
+		# Структурная проверка (один тик): не даём рефактору молча вернуть полный PBR.
+		var dmesh := _dormant.multimesh.mesh
+		var dsegs := (dmesh as CylinderMesh).radial_segments if dmesh is CylinderMesh else -1
+		var amesh := _coin_mm.multimesh.mesh
+		var asegs := (amesh as CylinderMesh).radial_segments if amesh is CylinderMesh else -1
+		var cheap_mat: bool = _dormant.material_override == Coin._material_lod \
+			and Coin._material_lod != null and Coin._material_lod != Coin._material
+		var shadow_off: bool = _dormant.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ok := dsegs == CFG.DORMANT_LOD_SEGS and asegs == Coin._mesh.radial_segments \
+			and cheap_mat and shadow_off
+		print("SMOKE lod: %s dormant_segs=%d active_segs=%d cheap_mat=%s shadow_off=%s" % [
+			"OK" if ok else "FAIL", dsegs, asegs, cheap_mat, shadow_off])
+		get_tree().quit(0 if ok else 1)
+		return
 	if _smoke_mode == "idle":
 		# Сцена «как на телефоне»: старт (5 монет, 995 в пуле), дозер стоит.
 		# Замер физики для сопоставления CI↔телефон (как HUD: physics/jolt/gd).
@@ -1379,7 +1426,10 @@ func _build_dormant_field() -> void:
 	var aabb := AABB(Vector3(ctr.x - r - 5, -2, ctr.z - r - 5),
 		Vector3(2 * r + 10, 12, 2 * r + 90))
 	add_child(_dormant)
-	_dormant.setup(CFG.DORMANT_MAX, aabb)
+	# B6: декор-слой на дешёвом LOD-меше/материале (fill-rate Mali на тысячах монет).
+	var segs: int = Coin.dormant_lod_segs if Coin.dormant_lod_segs > 0 else CFG.DORMANT_LOD_SEGS
+	Coin._ensure_lod(segs, Coin.dormant_mat_cheap)
+	_dormant.setup(CFG.DORMANT_MAX, aabb, Coin._mesh_lod, Coin._material_lod)
 
 
 ## Засеять n декор-монет (worth=1) ковром по арене — изобилие на экране. Лежат

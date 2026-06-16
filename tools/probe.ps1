@@ -2,7 +2,11 @@
 # ============================================================================
 # probe.ps1 — авто-телеметрия геймплея на РЕАЛЬНОМ телефоне одной командой.
 #
-#   pwsh tools/probe.ps1 [-Seed 7] [-DurationS 120] [-SkipBuild] [-KeepApk]
+#   pwsh tools/probe.ps1 [-Seed 7] [-DurationS 120] [-ExtraArgs "..."] [-SkipBuild] [-KeepApk]
+#
+# A/B рендера (B6): сравнить LOD-декор с полным PBR одной парой команд —
+#   pwsh tools/probe.ps1 -ExtraArgs "--probe-s=90 --probe-seed=3000 --dormant-hi"  # бейслайн
+#   pwsh tools/probe.ps1 -ExtraArgs "--probe-s=90 --probe-seed=3000"               # LOD (дефолт)
 #
 # Делает: собрать probe-APK (пресет Android-Probe, в нём запечён --probe-s) →
 # adb install → разбудить/держать экран → запустить → стримить @TLM из logcat
@@ -18,6 +22,7 @@
 param(
   [int]$Seed = 7,
   [int]$DurationS = 120,
+  [string]$ExtraArgs = '',   # B6 A/B: переопределить baked command_line/extra_args на этот прогон (восстанавливается после)
   [switch]$SkipBuild,
   [switch]$KeepApk
 )
@@ -29,6 +34,7 @@ $Pkg   = 'dev.zolotodozer.slice'
 $Act   = "$Pkg/com.godot.game.GodotApp"
 $Repo  = Split-Path $PSScriptRoot -Parent
 $Apk   = Join-Path $Repo 'godot\build\zolotodozer-probe.apk'
+$Preset = Join-Path $Repo 'godot\export_presets.cfg'
 $OutDir = Join-Path $Repo 'out\telemetry'
 
 function Info($m) { Write-Host "[probe] $m" -ForegroundColor Cyan }
@@ -46,14 +52,39 @@ Info "устройство на связи"
 
 # --- 1. сборка probe-APK ------------------------------------------------------
 if (-not $SkipBuild) {
+  $presetOrig = $null
+  if ($ExtraArgs) {
+    # A/B: запечь иные аргументы в Android-Probe на этот прогон, потом вернуть как было.
+    # Меняем строку extra_args ТОЛЬКО в секции [preset.1.options] (Android-Probe),
+    # чтобы не задеть пустую строку preset.0. Восстановление — в finally (даже при ошибке).
+    $presetOrig = Get-Content $Preset -Raw
+    $lines = $presetOrig -split "`r?`n"
+    $inP1 = $false; $patched = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+      if ($lines[$i] -match '^\[preset\.1\.options\]') { $inP1 = $true; continue }
+      if ($lines[$i] -match '^\[') { $inP1 = $false }
+      if ($inP1 -and $lines[$i] -match '^command_line/extra_args=') {
+        $lines[$i] = 'command_line/extra_args="' + $ExtraArgs + '"'; $patched = $true; break
+      }
+    }
+    if (-not $patched) { Fail "не нашёл command_line/extra_args в [preset.1.options] для -ExtraArgs" }
+    Set-Content -Path $Preset -Value ($lines -join "`n") -Encoding utf8 -NoNewline
+    Info "A/B: extra_args := `"$ExtraArgs`""
+  }
   Info "сборка Android-Probe APK…"
   Push-Location $Repo
   try {
     & $Godot --headless --path godot --export-debug 'Android-Probe' 'build/zolotodozer-probe.apk' 2>&1 |
       Select-String -Pattern 'error|Signed|export: end' | ForEach-Object { Write-Host "    $_" }
-  } finally { Pop-Location }
+  } finally {
+    Pop-Location
+    if ($presetOrig) { Set-Content -Path $Preset -Value $presetOrig -Encoding utf8 -NoNewline; Info "preset восстановлен" }
+  }
   if (-not (Test-Path $Apk)) { Fail "APK не собрался: $Apk" }
-} else { Info "сборка пропущена (-SkipBuild)" }
+} else {
+  Info "сборка пропущена (-SkipBuild)"
+  if ($ExtraArgs) { Info "ВНИМАНИЕ: -ExtraArgs игнорируется при -SkipBuild (APK уже собран)" }
+}
 if (-not (Test-Path $Apk)) { Fail "нет APK: $Apk (убери -SkipBuild)" }
 
 # --- 2. install ---------------------------------------------------------------

@@ -32,6 +32,7 @@ jobs:
             "--smoke-stress" \
             "--smoke-bucket" \
             "--smoke-spike" \
+            "--smoke-lod" \
             "--coins=500 --smoke-stress"; do
             echo "===== godot -- $args =====" | tee -a "$LOG"
             timeout 120 godot --headless --path godot -- $args 2>&1 | tee -a "$LOG"

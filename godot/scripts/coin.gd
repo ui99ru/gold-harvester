@@ -42,6 +42,13 @@ static var _mesh: CylinderMesh
 static var _material: StandardMaterial3D
 static var _phys_material: PhysicsMaterial
 
+# B6 LOD декор-слоя (dormant): тысячи фоновых монет рендерятся отдельным
+# дешёвым мешем/материалом. Конфиг задаётся из cmdline ДО _ensure_lod (в game._ready):
+static var _mesh_lod: CylinderMesh
+static var _material_lod: StandardMaterial3D
+static var dormant_lod_segs := 0      # >0 переопределяет CFG.DORMANT_LOD_SEGS (A/B --dormant-segs=)
+static var dormant_mat_cheap := true  # false (--dormant-hi) → полный PBR на декоре (бейслайн замера)
+
 
 static func _ensure_shared() -> void:
 	if _shape:
@@ -90,6 +97,38 @@ static func _ensure_shared() -> void:
 	_phys_material = PhysicsMaterial.new()
 	_phys_material.friction = 0.95                       # rapier coinFriction
 	_phys_material.bounce = 0.02                         # rapier coinRestitution
+
+
+## B6: дешёвый LOD для dormant-декора. ~2950 фоновых монет полным мешем (24 сег.) и
+## PBR с normal-map жгут fill-rate Mali (замер B2: рендер ≈40 мс/кадр при physics 17).
+## Издалека монеты неотличимы → режем стоимость per-fragment: меньше радиальных
+## сегментов + материал БЕЗ normal-map и со SPECULAR_DISABLED (главная экономия на
+## мобайле — нет спекуляр-выборки/нормали на фрагмент). Albedo-атлас (золото+гравировка)
+## и эмиссия (свечение) сохранены — «море золота» читается так же. Активные монеты у
+## ножа рисует полный _mesh/_material (их мало, они в фокусе). --dormant-hi → полный PBR
+## (бейслайн для A/B-замера). Идемпотентно (строится один раз за процесс).
+static func _ensure_lod(segs: int, cheap: bool) -> void:
+	_ensure_shared()
+	if _mesh_lod:
+		return
+	_mesh_lod = CylinderMesh.new()
+	_mesh_lod.top_radius = RADIUS
+	_mesh_lod.bottom_radius = RADIUS
+	_mesh_lod.height = THICKNESS
+	_mesh_lod.radial_segments = segs
+	if not cheap:
+		_material_lod = _material   # A/B-бейслайн (--dormant-hi): полный PBR на декоре
+		return
+	_material_lod = StandardMaterial3D.new()
+	_material_lod.albedo_color = Color.WHITE
+	_material_lod.albedo_texture = TexGen.coin_atlas()    # золото+гравировка — цвет сохранён
+	_material_lod.metallic = 0.0                          # металл без спекуляра = чёрный → диэлектрик
+	_material_lod.roughness = 1.0
+	_material_lod.specular_mode = BaseMaterial3D.SPECULAR_DISABLED  # ← главная экономия per-fragment
+	_material_lod.emission_enabled = true                 # золотое свечение оставляем
+	_material_lod.emission = Color("c06a00")
+	_material_lod.emission_energy_multiplier = 0.27
+	# normal_texture НЕ задаём: нет tangent-space выборки/нормали на каждый фрагмент
 
 
 func _ready() -> void:

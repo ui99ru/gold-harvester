@@ -21,18 +21,20 @@ var _max := 0
 var _grid: Dictionary = {}         # Vector2i -> PackedInt32Array(индексы записей)
 
 
-func setup(max_n: int, world_aabb: AABB) -> void:
+## mesh/mat — ресурсы рендера слоя. B6: передаём дешёвый LOD-меш/материал (Coin._mesh_lod
+## / Coin._material_lod); при null фолбэк на полные Coin._mesh/_material (старое поведение).
+func setup(max_n: int, world_aabb: AABB, mesh: Mesh = null, mat: Material = null) -> void:
 	Coin._ensure_shared()
 	_max = max_n
 	_xforms.resize(max_n)
 	_worth.resize(max_n)
 	_mm = MultiMesh.new()
 	_mm.transform_format = MultiMesh.TRANSFORM_3D
-	_mm.mesh = Coin._mesh
+	_mm.mesh = mesh if mesh != null else Coin._mesh
 	_mm.instance_count = max_n              # выделяем буфер ОДИН раз
 	_mm.visible_instance_count = 0
 	multimesh = _mm
-	material_override = Coin._material
+	material_override = mat if mat != null else Coin._material
 	# custom_aabb на весь уровень: иначе движок пересчитывает AABB на каждое
 	# изменение видимого числа (O(N) по инстансам) — спайк на больших полях.
 	custom_aabb = world_aabb
