@@ -109,3 +109,13 @@ const SOURCE_SPREAD_V := 3.5  # радиальный разлёт монет п�
 const UP_BLADE_HALF := 1.6
 const UP_REACH := 2.7
 const UP_MULT := 1.0
+
+# --- B5: sinks (лестницы апгрейд-падов) — пад не исчезает, а перезаряжается ×3 до кэпа ---
+const PAD_MAX_TIER := 4         # покупок до MAX (нож 1.6→3.6, скорость 10→18 — ровно 4 по +шагу)
+const PAD_COST_MULT := 3.0      # цена следующего тира = ×3
+const PAD_BLADE_ADD := 0.5      # пад НОЖ: up_blade_half += это
+const UP_BLADE_HALF_MAX := 3.6  # потолок ножа (просвет коридора 5.2 м лимитирует)
+const PAD_SPEED_ADD := 2.0      # пад СКОРОСТЬ: up_move += это
+const UP_MOVE_MAX := 18.0       # потолок скорости дозера
+const PAD_VALUE_MULT := 1.7     # пад ЦЕННОСТЬ: up_mult ×= это
+const COIN_SPEED_MARGIN := 4.0  # max_speed монет = up_move + это (ковш не продавит монеты сквозь чашу)

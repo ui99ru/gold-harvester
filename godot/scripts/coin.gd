@@ -26,6 +26,7 @@ const FLATTEN_K := 8.0
 var idx := -1                              # стабильный индекс в пуле (side-массивы ворот)
 var live_idx := -1                         # позиция в pool._live (swap-remove O(1)); -1 = запаркована
 var worth := 1                             # ценность; множится воротами
+var max_speed := MAX_SPEED                 # B5: пад СКОРОСТЬ поднимает кламп (иначе ковш продавит сквозь чашу)
 
 # Вызывается main'ом: (global_pos: Vector3, strength: float 0..1)
 var clink_cb := Callable()
@@ -195,10 +196,10 @@ func make_active() -> void:
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var v := state.linear_velocity
 	var s := v.length_squared()
-	if s > MAX_SPEED * MAX_SPEED:
-		state.linear_velocity = v.normalized() * MAX_SPEED
+	if s > max_speed * max_speed:
+		state.linear_velocity = v.normalized() * max_speed
 		v = state.linear_velocity
-		s = MAX_SPEED * MAX_SPEED
+		s = max_speed * max_speed
 
 	# Звон: удар с импульсом выше порога И тело реально движется (web clinkV)
 	if clink_cb.is_valid() and s > CLINK_V2:

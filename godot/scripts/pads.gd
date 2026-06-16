@@ -10,9 +10,12 @@ const BOT := 0.25
 var game: Node3D
 var cost := 120
 var fill := 0.0
-var done := false
+var done := false   # B5: true = лестница на MAX (зона больше не поглощает; стойка остаётся)
+var kind := "knife" # B5: knife | speed | value
+var tier := 0       # B5: куплено апгрейдов (до CFG.PAD_MAX_TIER)
 
 var _fill_bar: MeshInstance3D
+var _label: Label3D
 var _obstacle: Dictionary
 var _lift_zone: Dictionary
 
@@ -20,6 +23,7 @@ var _lift_zone: Dictionary
 func setup(p_game: Node3D, def: EntityDef) -> void:
 	game = p_game
 	cost = def.params["cost"]
+	kind = def.params.get("kind", "knife")
 	position = def.position
 	rotation.y = def.rotation_y
 
@@ -64,7 +68,6 @@ func _ready() -> void:
 	_box(Vector3(1.9, 0.55, 0.3), gm, Vector3(0, -0.12, 1.05), ghost)
 
 	var lbl := Label3D.new()
-	lbl.text = "UPGRADE\nНОЖ %s" % Game.fmt(cost)
 	lbl.font_size = 110
 	lbl.pixel_size = 0.01
 	lbl.outline_size = 18
@@ -72,6 +75,8 @@ func _ready() -> void:
 	lbl.position = Vector3(0, 4.0, 2.45)
 	lbl.rotation.y = PI
 	add_child(lbl)
+	_label = lbl
+	_label.text = _label_text()
 
 
 func step(_dt: float) -> void:
@@ -96,15 +101,43 @@ func step(_dt: float) -> void:
 	if cnt > 0:
 		game.on_coins_absorbed(position, cnt)
 	if fill >= cost:
-		done = true
-		game.obstacles.erase(_obstacle)
-		game.lift_zones.erase(_lift_zone)
-		game.on_pad_upgraded(self)
-		queue_free()
+		# B5 лестница: применить эффект, перезарядиться ×3 до кэпа, иначе уйти в MAX.
+		game.apply_pad_effect(kind)
+		tier += 1
+		game.shake += 0.34
+		game.fx.sparks(position.x, position.z, 22)
+		game.audio.chime("upgrade")
+		if tier >= CFG.PAD_MAX_TIER:
+			_retire()
+		else:
+			fill = 0.0
+			cost = int(cost * CFG.PAD_COST_MULT)
+			_label.text = _label_text()
+			_fill_bar.scale.y = 0.001
 	else:
 		var r := clampf(fill / cost, 0.001, 1.0)
 		_fill_bar.scale.y = r
 		_fill_bar.position.y = BOT + GH * r * 0.5
+
+
+## B5: пад достиг MAX-тира — перестаёт поглощать (done), лейбл MAX, но стойка/препятствие
+## остаётся в мире (визуальный «памятник» прокачке, web addPad не убирал столб).
+func _retire() -> void:
+	done = true
+	_label.text = "%s\nMAX" % _kind_name()
+	_fill_bar.scale.y = 1.0
+	_fill_bar.position.y = BOT + GH * 0.5
+
+
+func _kind_name() -> String:
+	match kind:
+		"speed": return "СКОРОСТЬ"
+		"value": return "ЦЕННОСТЬ"
+		_: return "НОЖ"
+
+
+func _label_text() -> String:
+	return "UPGRADE\n%s %s" % [_kind_name(), Game.fmt(cost)]
 
 
 func _box(size: Vector3, mat: Material, pos: Vector3, parent: Node3D = null) -> MeshInstance3D:

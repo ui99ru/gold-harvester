@@ -213,7 +213,7 @@ func _build_entities() -> void:
 				gt.setup(self, e)
 				add_child(gt)
 				gates.append(gt)
-			"pad_knife":
+			"pad_knife", "pad":  # B5: pad {kind: knife|speed|value}; pad_knife — ист. алиас (kind=knife)
 				var pd := UpgradePad.new()
 				pd.setup(self, e)
 				add_child(pd)
@@ -374,14 +374,21 @@ func on_gate_unlocked(g: Gate) -> void:
 	audio.chime("upgrade")
 
 
-func on_pad_upgraded(pd: UpgradePad) -> void:
-	# Апгрейд НОЖ: шире ковш (web apply, main.js:253)
-	up_blade_half += 0.5
-	dozer.rebuild_blade(dozer.blade_hx())
-	pads.erase(pd)
-	shake += 0.34
-	fx.sparks(pd.position.x, pd.position.z, 22)
-	audio.chime("upgrade")
+## B5: применить эффект пада-лестницы (нож/скорость/ценность), упёршись в свой потолок.
+## Кэп лестницы (число покупок) держит сам пад по тиру; здесь — только эффект.
+func apply_pad_effect(kind: String) -> void:
+	match kind:
+		"knife":  # шире ковш (web apply, main.js:253); кэп 3.6 — просвет коридора
+			up_blade_half = minf(up_blade_half + CFG.PAD_BLADE_ADD, CFG.UP_BLADE_HALF_MAX)
+			dozer.rebuild_blade(dozer.blade_hx())
+		"speed":  # быстрее дозер + ПОДНЯТЬ кламп скорости монет (иначе ковш продавит сквозь чашу)
+			up_move = minf(up_move + CFG.PAD_SPEED_ADD, CFG.UP_MOVE_MAX)
+			var ms := up_move + CFG.COIN_SPEED_MARGIN
+			pool.coin_max_speed = ms
+			for c in pool.get_children():
+				c.max_speed = ms  # и активные, и запаркованные → консистентно при будущем спавне
+		"value":  # дороже каждая монета
+			up_mult *= CFG.PAD_VALUE_MULT
 
 
 func _build_dozer() -> void:
@@ -972,6 +979,10 @@ func _setup_smoke() -> void:
 				0.1 + 0.15 * floorf(n / 20.0),
 				8.0 + 0.8 * (floori(n / 5.0) % 4))
 			n += 1
+		# B5: гоним тест на МАКС скорости (up_move=18, max_speed монет=22) — худший случай
+		# туннелирования; проверяем, что подъём max_speed не даёт ковшу продавить сквозь монеты.
+		for i in 4:
+			apply_pad_effect("speed")
 		_script_target = Vector3(0, 0, 13.5)
 	elif _smoke_mode == "gatefill":
 		# 12 монет узкой кучей (в ширину ковша) перед матом ворот-1 —
@@ -1241,6 +1252,24 @@ func _smoke_tick() -> void:
 				"OK" if ok else "FAIL", _hydrate_seeded, bank_gain, pad.fill, _dormant.count()])
 			get_tree().quit(0 if ok else 1)
 		return
+	if _smoke_mode == "sinks":
+		# B5: эффекты лестниц упираются в потолки (нож 3.6, скорость 18 + max_speed монет 22,
+		# ценность множится ×1.7). Юнит-тест apply_pad_effect — пады speed/value в карте появятся с B4.
+		for i in 6: apply_pad_effect("knife")
+		for i in 6: apply_pad_effect("speed")
+		for i in 4: apply_pad_effect("value")
+		var ms_ok := true
+		for c in pool.get_children():
+			if absf(c.max_speed - (CFG.UP_MOVE_MAX + CFG.COIN_SPEED_MARGIN)) > 0.001:
+				ms_ok = false
+				break
+		var ok := absf(up_blade_half - CFG.UP_BLADE_HALF_MAX) < 0.001 \
+			and absf(up_move - CFG.UP_MOVE_MAX) < 0.001 and ms_ok \
+			and absf(up_mult - CFG.UP_MULT * pow(CFG.PAD_VALUE_MULT, 4)) < 0.01
+		print("SMOKE sinks: %s blade=%.2f move=%.1f maxspd_ok=%s mult=%.3f" % [
+			"OK" if ok else "FAIL", up_blade_half, up_move, ms_ok, up_mult])
+		get_tree().quit(0 if ok else 1)
+		return
 	if _smoke_mode == "idle":
 		# Сцена «как на телефоне»: старт (5 монет, 995 в пуле), дозер стоит.
 		# Замер физики для сопоставления CI↔телефон (как HUD: physics/jolt/gd).
@@ -1451,16 +1480,15 @@ func _smoke_tick() -> void:
 			get_tree().quit(0)
 	elif _smoke_mode == "knife":
 		if _smoke_ticks >= 240:  # 4 c
+			# B5 лестница: после одного тира нож 1.6→2.1, пад НЕ исчез, перезарядился ×3.
+			var pd: UpgradePad = pads[0] if not pads.is_empty() else null
 			var bh_ok := absf(up_blade_half - 2.1) < 0.001
-			var pad_gone := pads.is_empty()
-			var stand_gone := true
-			for o in obstacles:
-				if not o.post:
-					stand_gone = false
+			var rearmed := pd != null and pd.tier == 1 and not pd.done and pd.cost == 360
 			var books := pool.active_count() + pool.free_count() == pool.size
-			var ok := bh_ok and pad_gone and stand_gone and books and bank >= 120.0
-			print("SMOKE %s: blade_half=%.1f pad_gone=%s stand_gone=%s bank=%.0f books=%s" %
-				["OK" if ok else "FAIL", up_blade_half, pad_gone, stand_gone, bank, books])
+			var ok := bh_ok and rearmed and books and bank >= 120.0
+			print("SMOKE knife: %s blade_half=%.1f tier=%d cost=%d pad_present=%s books=%s" % [
+				"OK" if ok else "FAIL", up_blade_half, (pd.tier if pd else -1),
+				(pd.cost if pd else -1), pd != null, books])
 			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "trash":
 		if _smoke_ticks >= 240:  # 4 c

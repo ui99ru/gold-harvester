@@ -8,6 +8,10 @@ const COIN_SCENE := preload("res://scenes/coin.tscn")
 
 var size := 0
 
+# B5: текущий потолок скорости монеты (пад СКОРОСТЬ поднимает). Свежеспавненная монета
+# получает актуальное значение; game обновляет и это поле, и уже живые монеты при апгрейде.
+var coin_max_speed := 12.0
+
 # Сброс эдж-триггеров сущностей (ворота side[]) для свежеспавненной монеты:
 # spawn в произвольной точке (гидрация B1, докидка) не должен тащить stale
 # side[idx] от прошлой жизни слота → фантомное умножение ворот. Прокидывает
@@ -53,6 +57,7 @@ func spawn(pos: Vector3, random_tilt := true) -> RigidBody3D:
 	coin.linear_velocity = Vector3.ZERO
 	coin.angular_velocity = Vector3.ZERO
 	coin.dormant = false     # O3: свежая монета — активная (dynamic)
+	coin.max_speed = coin_max_speed  # B5: актуальный потолок скорости (пад СКОРОСТЬ)
 	coin._refresh_monitor()  # O5: свежеспавненная монета активна → монитор контактов on
 	coin.live_idx = _live.size()
 	_live.append(coin)       # B6: в список «в игре» для поллинга сущностями
