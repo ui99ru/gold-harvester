@@ -65,19 +65,19 @@ func _process(delta: float) -> void:
 	_frames += 1
 	if _frame_accum < 0.5:
 		return
-	var pool := Vector3i.ZERO
+	var pool := Vector4i.ZERO
 	if pool_stats_cb.is_valid():
 		pool = pool_stats_cb.call()
 	var phys_ms := 1000.0 * _phys_accum / _frames
 	var gd_ms := _gd_accum / _frames                  # GDScript-сим (экономика/пузырь/дозер)
 	var jolt_ms := maxf(0.0, phys_ms - gd_ms)         # остаток = шаг физ-сервера Jolt
 	var phone_ms := phys_ms * PHONE_FACTOR
-	_label.text = "FPS %d  |  frame %.2f ms\nphysics %.2f ms (jolt %.2f / gd %.2f)\n≈телефон %.1f / %.1f ms\nactive bodies %d\ncoins %d / pool %d / dormant %d" % [
+	_label.text = "FPS %d  |  frame %.2f ms\nphysics %.2f ms (jolt %.2f / gd %.2f)\n≈телефон %.1f / %.1f ms\nactive bodies %d\ncoins %d / pool %d / dormant %d / cap %d" % [
 		Engine.get_frames_per_second(),
 		1000.0 * _frame_accum / _frames,
 		phys_ms, jolt_ms, gd_ms, phone_ms, FRAME_BUDGET_MS,
 		Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS),
-		pool.x, pool.y, pool.z,
+		pool.x, pool.y, pool.z, pool.w,
 	]
 	_label.add_theme_color_override("font_color",
 		Color(1, 0.45, 0.4) if phone_ms > FRAME_BUDGET_MS else Color(1, 1, 1, 0.92))

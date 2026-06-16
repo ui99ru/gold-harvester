@@ -180,7 +180,10 @@ func _step_active() -> void:
 		if v.x * normal.x + v.z * normal.z < CFG.GATE_MIN_V:
 			continue  # просачивание под давлением кучи (медленно) не множит
 		var w: int = coin.worth
-		var k: int = mini(mult - 1, mini(CFG.GATE_BURST, game.pool.free_count()))
+		# B2: копий не больше, чем влезает под кэп активных (budget_left) и в пул;
+		# k=0 → полная конденсация (worth = w*mult в одной монете) — инвариант цел.
+		var k: int = clampi(mini(mult - 1, mini(CFG.GATE_BURST,
+			mini(game.budget_left(), game.pool.free_count()))), 0, mult - 1)
 		coin.worth = w * (mult - k)
 		for c in k:
 			# Копии выплёскиваются ВПЕРЁД волной у земли и разливаются по плоскости,

@@ -16,6 +16,14 @@ var up_mult := CFG.UP_MULT
 
 var phase := "start"     # start | play
 var bank := 0
+
+# B2: авто-адаптивный кэп активных тел (AIMD). Гидрация держит active≈cap, волна
+# ворот множит под budget_left — так «изобилие» (декор) не утягивает физику. На
+# слабом железе cap сам сожмётся (physics > target). --cap=N замораживает контроллер.
+var cap := 0
+var _phys_ema := 0.0
+var _cap_frozen := false
+var _cap_override := 0
 var heading := 0.0
 var driving := false
 var speed_now := 0.0
@@ -119,6 +127,7 @@ func _ready() -> void:
 	add_child(pool)
 	pool.setup(_pool_size_override if _pool_size_override > 0 else CFG.COIN_N, _on_coin_clink)
 	pool.spawn_resetters = side_resetters  # spawn() чистит stale side[] (ворота добавят сброс ниже, та же ссылка)
+	cap = mini(_cap_override if _cap_frozen else CFG.CAP_START, pool.size)  # B2: кэп ≤ размер пула (иначе нож-призрак при --cap>пул)
 	_build_coin_multimesh()  # общий рендер всех монет одним MultiMesh
 	_build_dormant_field()   # B1: декор-слой dormant-монет (изобилие без физ-тел)
 	_build_entities()
@@ -272,8 +281,8 @@ func _build_hud_and_menu() -> void:
 
 	# Performance HUD + тумблеры тюнинга (петля «десктоп + прокси телефона»)
 	var hud := preload("res://scripts/performance_hud.gd").new()
-	hud.pool_stats_cb = func() -> Vector3i:
-		return Vector3i(pool.active_count(), pool.free_count(), _dormant.count() if _dormant else 0)
+	hud.pool_stats_cb = func() -> Vector4i:
+		return Vector4i(pool.active_count(), pool.free_count(), _dormant.count() if _dormant else 0, cap)
 	hud.spawn_50_cb = func() -> void:
 		for i in 50:
 			place_at_source(pool.spawn(Vector3.ZERO, false))
@@ -414,6 +423,9 @@ func _parse_user_args() -> void:
 			_pool_size_override = int(arg.get_slice("=", 1))
 		elif arg.begins_with("--probe-seed="):
 			_probe_seed = int(arg.get_slice("=", 1))  # B1: засев dormant-изобилия
+		elif arg.begins_with("--cap="):
+			_cap_override = int(arg.get_slice("=", 1))  # B2: заморозить AIMD-кэп (детерминизм)
+			_cap_frozen = true
 		elif arg.begins_with("--cal="):
 			var c := arg.get_slice("=", 1).split(",")
 			_cal_sun = float(c[0])
@@ -454,7 +466,7 @@ func _start_probe() -> void:
 			"free": pool.free_count(),
 			"dormant": dorm,
 			"vis_gold": _dormant.count() if _dormant else 0,  # декор-монеты dormant-слоя
-			"cap": -1,  # AIMD-бюджет (этап B2) экспонирует сюда game.cap
+			"cap": cap,  # B2: текущий AIMD-кэп активных тел
 		}
 	if _probe_seed > 0:
 		seed_dormant(_probe_seed)  # B1: изобилие на экране для замера гидра/рендера
@@ -817,6 +829,8 @@ func sim_step(dt: float) -> void:
 			elif p.y < 0.6 and coin.linear_velocity.length_squared() < 1.0:
 				if lz < -4.5 or lz > 7.5 or absf(lat) > bw + 3.2:
 					coin.make_dormant()      # осела вне зоны (с запасом) → спим
+	# B2 авто-бюджет активных тел (AIMD) → B1 гидрация держит active≈cap
+	_budget_tick()
 	# B1 ГИДРАЦИЯ (каждый тик, анти нож-призрак): dormant-записи у дозера → тела
 	_hydrate_pass()
 	# Экономика (web stepEconomy; физика монет шагает движком после)
@@ -1036,6 +1050,22 @@ func _setup_smoke() -> void:
 		_smoke_gd_max = 0
 		dozer.position = Vector3(20, 0, 5)
 		_script_target = Vector3(20, 0, 13)
+	elif _smoke_mode == "abundance":
+		# B2: изобилие (3000 dormant) + дозер-змейка СБОКУ (x≈18, вне ворот/падов) 30 с
+		# под ЗАМОРОЖЕННЫМ кэпом 150. Проверяем: active держится у кэпа, worth
+		# константа (нет умножения вне ворот), узлы не текут. Кэп-сжатие — на телефоне.
+		for coin in pool.get_children():
+			if not coin.freeze:
+				pool.release(coin)
+		_cap_frozen = true
+		_cap_override = 150
+		cap = 150
+		seed_dormant(3000)
+		_hydrate_seeded = _dormant.count()
+		_active_prev = 0
+		dozer.position = Vector3(16, 0, 10)
+		_loop_dir = 1
+		_script_target = Vector3(16, 0, 18)
 
 
 func _descendants(n: Node) -> int:
@@ -1214,6 +1244,37 @@ func _smoke_tick() -> void:
 				["OK" if ok else "FAIL", total, expect, _hydrate_total, gd_ms])
 			get_tree().quit(0 if ok else 1)
 		return
+	elif _smoke_mode == "abundance":
+		# Змейка x≈16, z 10-18 — зона СВОБОДНА от сущностей (ворота x≈0; пады/трэш
+		# x=±9,z=30; стены) и внутри кольца. Так worth не уходит в банк/сжигание —
+		# чистая проверка инварианта гидра/дегидра под кэпом.
+		var weave := 16.0 + 3.0 * sin(_smoke_ticks * 0.05)
+		if _loop_dir == 1 and dozer.position.z > 16.5:
+			_loop_dir = -1
+			_script_target = Vector3(weave, 0, 10)
+		elif _loop_dir == -1 and dozer.position.z < 11.5:
+			_loop_dir = 1
+			_script_target = Vector3(weave, 0, 18)
+		else:
+			_script_target = Vector3(weave, 0, 10.0 if _loop_dir == -1 else 18.0)
+		if _smoke_ticks == 120:
+			_loop_nodes0 = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
+		if _smoke_ticks > 120 and pool.active_count() > _active_prev:
+			_active_prev = pool.active_count()  # пик активных за прогон
+		if _smoke_ticks >= 1800:  # 30 c
+			var aw := 0
+			for coin in pool.get_children():
+				if not coin.get_meta("in_pool", false):
+					aw += coin.worth
+			var total := aw + _dormant.total_worth()
+			var leaked := int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)) - _loop_nodes0
+			# active держится у кэпа (не сверх cap+burst), worth константа, узлы плоские
+			var ok := total == _hydrate_seeded and _active_prev >= 50 \
+				and _active_prev <= cap + CFG.GATE_BURST and leaked < 200
+			print("SMOKE abundance: %s worth=%d/%d max_active=%d cap=%d leaked=%d" %
+				["OK" if ok else "FAIL", total, _hydrate_seeded, _active_prev, cap, leaked])
+			get_tree().quit(0 if ok else 1)
+		return
 	elif _smoke_mode == "stress":
 		# Замер ОСЕВШЕЙ кучи: усредняем только последние 5 c (ticks 600..900),
 		# исключая взрыв спавна. Свип размера: ++ --coins=N --smoke-stress.
@@ -1338,6 +1399,29 @@ func seed_dormant(n: int) -> void:
 			break  # слой полон
 
 
+## B2: сколько ещё тел можно поднять под кэп (может быть <0, если active > cap).
+func budget_left() -> int:
+	return cap - pool.active_count()
+
+
+## B2 AIMD: держим physics-мс у цели подстройкой кэпа активных тел. EMA каждый
+## тик; раз в 30 тиков шаг: перегруз → мультипликативное сжатие (×0.9), запас →
+## аддитивный рост (+25). Деадбенд (0.7×target) против осцилляции. --cap=N замораживает.
+func _budget_tick() -> void:
+	# Заморозка: --cap=N; либо смоуки (детерминизм — AIMD читает реальный тайминг).
+	# Probe (телефон) — адаптируем: показать само-сжатие кэпа это и есть цель.
+	if _cap_frozen or (test_mode and not _probe):
+		return
+	var pm := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+	_phys_ema += (pm - _phys_ema) * CFG.BUDGET_EMA_K
+	if Engine.get_physics_frames() % 30 != 0:
+		return
+	if _phys_ema > CFG.BUDGET_TARGET_MS:
+		cap = maxi(100, int(cap * 0.9))
+	elif _phys_ema < CFG.BUDGET_TARGET_MS * 0.7:
+		cap = mini(pool.size, cap + 25)
+
+
 ## B1 ГИДРАЦИЯ: dormant-записи в радиусе HYDRATE_R вокруг смещённого центра →
 ## поднимаем тела из пула, бюджет HYDRATE_TICK_BUDGET/тик. Сортировка ближних-
 ## первыми (анти нож-призрак) — ТОЛЬКО при дефиците бюджета (иначе порядок неважен,
@@ -1354,9 +1438,11 @@ func _hydrate_pass() -> void:
 	var n := idxs.size()
 	if n == 0:
 		return
-	var budget := CFG.HYDRATE_TICK_BUDGET
+	# B2: нормальная гидрация — только под кэп (budget_left). Сверх кэпа поднимается
+	# лишь ЯДРО (через эвакуацию дальних тел ниже) — анти нож-призрак важнее кэпа.
+	var budget := mini(CFG.HYDRATE_TICK_BUDGET, maxi(0, budget_left()))
 	var order := idxs
-	if n > budget:  # порядок (ближние первыми) нужен только когда не всё влезает
+	if n > budget:  # порядок (ближние первыми) важен при дефиците бюджета/у кэпа
 		var cand: Array = []
 		cand.resize(n)
 		for k in n:
@@ -1376,31 +1462,34 @@ func _hydrate_pass() -> void:
 	var evac_built := false
 	var to_remove := PackedInt32Array()
 	for k in order.size():
-		if budget <= 0:
-			break
 		var i := order[k]
 		var xf := _dormant.get_xform(i)
-		var c: RigidBody3D = pool.spawn(xf.origin, false)
+		var dx := xf.origin.x - dozer.position.x
+		var dz := xf.origin.z - dozer.position.z
+		var is_core := dx * dx + dz * dz <= core_r2
+		var c: RigidBody3D = null
+		if budget > 0:
+			c = pool.spawn(xf.origin, false)
+			if c != null:
+				budget -= 1
 		if c == null:
-			# Пул пуст. ЯДРО (у ножа) — безусловно: эвакуируем дальнее спящее тело
-			# (вне HYDRATE_R от центра, не «своё»). Вне ядра — пропуск (не нож-призрак).
-			var dx := xf.origin.x - dozer.position.x
-			var dz := xf.origin.z - dozer.position.z
-			if dx * dx + dz * dz <= core_r2 and evac_budget > 0:
-				if not evac_built:
-					evac = _build_evac_list(center)
-					evac_built = true
-				c = _evac_pop(evac)
-				if c != null:
-					evac_budget -= 1
+			# Бюджет исчерпан (у кэпа) или пул физически полон. ЯДРО (у ножа) —
+			# безусловно: эвакуируем дальнее тело (active не растёт сверх cap). Не-ядро
+			# у кэпа — стоп (сортировка ближних-первыми → дальше только дальние).
+			if not is_core or evac_budget <= 0:
+				break
+			if not evac_built:
+				evac = _build_evac_list(center)
+				evac_built = true
+			c = _evac_pop(evac)
 			if c == null:
 				break
+			evac_budget -= 1
 		c.transform = xf
 		c.worth = _dormant.get_worth(i)
 		c.sleeping = true
 		to_remove.append(i)
 		_hydrate_total += 1
-		budget -= 1
 	to_remove.sort()  # нативный sort PackedInt32Array; удаляем с конца (по убыванию)
 	var j := to_remove.size() - 1
 	while j >= 0:

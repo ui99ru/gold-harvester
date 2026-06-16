@@ -89,6 +89,11 @@ const HYDRATE_CORE_R := 3.2   # «ядро» у ножа: тут гидраци�
 const HYDRATE_TICK_BUDGET := 100  # макс подъёмов за тик
 const DEHYDRATE_PASS_BUDGET := 150 # макс опусканий за проход (раз в 10 тиков)
 const EVACUATE_TICK_BUDGET := 30  # макс эвакуаций дальних тел за тик (кап спайка при пустом пуле)
+
+# --- B2: авто-адаптивный бюджет активных тел (AIMD) ---
+const CAP_START := 300        # стартовый кэп активных тел (AIMD сам подстроит)
+const BUDGET_TARGET_MS := 8.0 # цель physics-мс; >target → cap×0.9, <0.7×target → cap+25
+const BUDGET_EMA_K := 0.05    # сглаживание EMA physics-мс
 const SOURCE_SPREAD_V := 3.5  # радиальный разлёт монет при респауне («волна», против плотной башни)
 
 # --- UP-апгрейды: стартовые значения (мутабельная копия живёт в game.gd) ---
