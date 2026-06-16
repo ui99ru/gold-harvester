@@ -1024,6 +1024,16 @@ func _setup_smoke() -> void:
 		var c := pool.spawn(Vector3(0, 0.15, 18.6), false)
 		c.linear_velocity = Vector3(0, 0, 12.0)  # трение тормозит ~28 м/с²
 		dozer.position = Vector3(0, 0, 5)  # дозер в стороне от створа
+	elif _smoke_mode == "gate3":
+		# B4: ворота-3 (gates[2], ×1000) принудительно открыты; монета worth=1 сквозь.
+		# Инвариант: сумма worth (active+dormant) ровно ×1000 (конденсация под GATE_BURST).
+		for coin in pool.get_children():
+			if not coin.freeze:
+				pool.release(coin)
+		gates[2].active = true
+		var c3 := pool.spawn(Vector3(0, 0.15, 60.6), false)  # перед матом gate3 (z62), +z
+		c3.linear_velocity = Vector3(0, 0, 12.0)
+		dozer.position = Vector3(0, 0, 5)  # дозер далеко от створа gate3
 	elif _smoke_mode == "spike":
 		# Замер ПИКА (фриз), не среднего: дозер проталкивает кучу сквозь
 		# открытые ворота-2 ×100 — реальный триггер каскада. Каждая пересёкшая
@@ -1289,8 +1299,10 @@ func _smoke_tick() -> void:
 		# (ворота-1 открыты): гоним сквозь них на мат ворот-2 (z38). Фаза 3
 		# (обе открыты): полный прогон до z45. Назад всегда к источнику (z6).
 		var fwd_z := 18.0
-		if gates[1].active:
-			fwd_z = 45.0
+		if gates.size() > 2 and gates[2].active:
+			fwd_z = 66.0   # gate3 открыт → за него (харвест-зона)
+		elif gates[1].active:
+			fwd_z = 63.0   # gate2 открыт → к мату gate3 (z62), чтобы наполнить его
 		elif gates[0].active:
 			fwd_z = 38.0
 		# Змейка по x: ковш ~2 м, коридор 5.6 м — собираем монеты с краёв.
@@ -1515,6 +1527,22 @@ func _smoke_tick() -> void:
 			var ok := total_worth == 10 and n_total == 10 and books
 			print("SMOKE %s: worth_sum=%d count(act+dorm)=%d books=%s" %
 				["OK" if ok else "FAIL", total_worth, n_total, books])
+			get_tree().quit(0 if ok else 1)
+	elif _smoke_mode == "gate3":
+		if _smoke_ticks >= 360:  # 6 c: волна gate3 ×1000
+			# Инвариант worth (active+dormant) = 1×1000; копий не более GATE_BURST → конденсация.
+			var total_worth := _dormant.total_worth()
+			var n_total := _dormant.count()
+			for coin in pool.get_children():
+				if coin.get_meta("in_pool", false):
+					continue
+				total_worth += coin.worth
+				n_total += 1
+			var books := pool.active_count() + pool.free_count() == pool.size
+			var ok := gates.size() == 3 and gates[2].mult == 1000 \
+				and total_worth == 1000 and n_total <= 1 + CFG.GATE_BURST and books
+			print("SMOKE gate3: %s mult=%d worth_sum=%d count=%d books=%s" % [
+				"OK" if ok else "FAIL", gates[2].mult, total_worth, n_total, books])
 			get_tree().quit(0 if ok else 1)
 	elif _smoke_mode == "push":
 		if _smoke_ticks >= 600:  # 10 c

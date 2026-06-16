@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="LevelDef" load_steps=18 format=3]
+[gd_resource type="Resource" script_class="LevelDef" load_steps=29 format=3]
 
 [ext_resource type="Script" path="res://scripts/level_def.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/entity_def.gd" id="2"]
@@ -21,22 +21,40 @@ params = {
 "half": Vector3(0.2, 0.6, 11.75)
 }
 
-[sub_resource type="Resource" id="w03"]
+[sub_resource type="Resource" id="w03a"]
 script = ExtResource("2")
 type = "wall"
-position = Vector3(-2.8, 0.6, 45.25)
+position = Vector3(-2.8, 0.6, 39.9)
 rotation_y = 0.0
 params = {
-"half": Vector3(0.2, 0.6, 12.75)
+"half": Vector3(0.2, 0.6, 7.4)
 }
 
-[sub_resource type="Resource" id="w04"]
+[sub_resource type="Resource" id="w03b"]
 script = ExtResource("2")
 type = "wall"
-position = Vector3(2.8, 0.6, 45.25)
+position = Vector3(-2.8, 0.6, 59.35)
 rotation_y = 0.0
 params = {
-"half": Vector3(0.2, 0.6, 12.75)
+"half": Vector3(0.2, 0.6, 6.65)
+}
+
+[sub_resource type="Resource" id="w04a"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(2.8, 0.6, 39.9)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 7.4)
+}
+
+[sub_resource type="Resource" id="w04b"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(2.8, 0.6, 59.35)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 6.65)
 }
 
 [sub_resource type="Resource" id="w05"]
@@ -138,6 +156,90 @@ position = Vector3(9, 0, 30)
 rotation_y = 1.5707963267949
 params = {}
 
+[sub_resource type="Resource" id="w14"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(-7.15, 0.6, 47.3)
+rotation_y = 0.0
+params = {
+"half": Vector3(4.35, 0.6, 0.2)
+}
+
+[sub_resource type="Resource" id="w15"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(7.15, 0.6, 47.3)
+rotation_y = 0.0
+params = {
+"half": Vector3(4.35, 0.6, 0.2)
+}
+
+[sub_resource type="Resource" id="w16"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(-7.15, 0.6, 52.7)
+rotation_y = 0.0
+params = {
+"half": Vector3(4.35, 0.6, 0.2)
+}
+
+[sub_resource type="Resource" id="w17"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(7.15, 0.6, 52.7)
+rotation_y = 0.0
+params = {
+"half": Vector3(4.35, 0.6, 0.2)
+}
+
+[sub_resource type="Resource" id="w18"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(-11.65, 0.6, 50)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 2.9)
+}
+
+[sub_resource type="Resource" id="w19"]
+script = ExtResource("2")
+type = "wall"
+position = Vector3(11.65, 0.6, 50)
+rotation_y = 0.0
+params = {
+"half": Vector3(0.2, 0.6, 2.9)
+}
+
+[sub_resource type="Resource" id="gate3"]
+script = ExtResource("2")
+type = "gate"
+position = Vector3(0, 0, 62)
+rotation_y = 0.0
+params = {
+"cost": 5000,
+"mult": 1000
+}
+
+[sub_resource type="Resource" id="pad_value"]
+script = ExtResource("2")
+type = "pad"
+position = Vector3(-9, 0, 50)
+rotation_y = -1.5707963267949
+params = {
+"cost": 200,
+"kind": "value"
+}
+
+[sub_resource type="Resource" id="pad_speed"]
+script = ExtResource("2")
+type = "pad"
+position = Vector3(9, 0, 50)
+rotation_y = 1.5707963267949
+params = {
+"cost": 150,
+"kind": "speed"
+}
+
 [resource]
 script = ExtResource("1")
 source_pos = Vector3(0, 0, 9)
@@ -145,5 +247,5 @@ source_radius = 2.5
 start_coins = 5
 dozer_start = Vector3(0, 0, 0)
 ring_center = Vector3(0, 0, 31)
-ring_radius = 32.0
-entities = Array[ExtResource("2")]([SubResource("w01"), SubResource("w02"), SubResource("w03"), SubResource("w04"), SubResource("w05"), SubResource("w06"), SubResource("w07"), SubResource("w08"), SubResource("w09"), SubResource("w10"), SubResource("w11"), SubResource("gate1"), SubResource("gate2"), SubResource("pad_knife"), SubResource("trash")])
+ring_radius = 42.0
+entities = Array[ExtResource("2")]([SubResource("w01"), SubResource("w02"), SubResource("w03a"), SubResource("w03b"), SubResource("w04a"), SubResource("w04b"), SubResource("w05"), SubResource("w06"), SubResource("w07"), SubResource("w08"), SubResource("w09"), SubResource("w10"), SubResource("w11"), SubResource("w14"), SubResource("w15"), SubResource("w16"), SubResource("w17"), SubResource("w18"), SubResource("w19"), SubResource("gate1"), SubResource("gate2"), SubResource("gate3"), SubResource("pad_knife"), SubResource("pad_value"), SubResource("pad_speed"), SubResource("trash")])
