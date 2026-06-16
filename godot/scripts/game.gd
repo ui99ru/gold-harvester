@@ -1106,6 +1106,15 @@ func _descendants(n: Node) -> int:
 	return c
 
 
+## Гистограмма видимых VisualInstance3D по классу в поддереве (гард draw-calls в смоуках).
+func _count_visuals(n: Node, hist: Dictionary) -> void:
+	if n is VisualInstance3D and n.visible:
+		var k: String = n.get_class()
+		hist[k] = hist.get(k, 0) + 1
+	for ch in n.get_children():
+		_count_visuals(ch, hist)
+
+
 func _smoke_tick() -> void:
 	if _smoke_mode == "":
 		return
@@ -1124,10 +1133,15 @@ func _smoke_tick() -> void:
 		var cheap_mat: bool = _dormant.material_override == Coin._material_lod \
 			and Coin._material_lod != null and Coin._material_lod != Coin._material
 		var shadow_off: bool = _dormant.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# B6 батч дозера: после слияния под дозером должно остаться мало MeshInstance3D
+		# (Merged корпус + Merged ковш; треды — MultiMesh). Гард от регресса (был ~59).
+		var hist := {}
+		_count_visuals(dozer, hist)
+		var dozer_mi: int = hist.get("MeshInstance3D", 0)
 		var ok := dsegs == CFG.DORMANT_LOD_SEGS and asegs == Coin._mesh.radial_segments \
-			and cheap_mat and shadow_off
-		print("SMOKE lod: %s dormant_segs=%d active_segs=%d cheap_mat=%s shadow_off=%s" % [
-			"OK" if ok else "FAIL", dsegs, asegs, cheap_mat, shadow_off])
+			and cheap_mat and shadow_off and dozer_mi <= 6
+		print("SMOKE lod: %s dormant_segs=%d active_segs=%d cheap_mat=%s shadow_off=%s dozer_meshes=%d" % [
+			"OK" if ok else "FAIL", dsegs, asegs, cheap_mat, shadow_off, dozer_mi])
 		get_tree().quit(0 if ok else 1)
 		return
 	if _smoke_mode == "idle":

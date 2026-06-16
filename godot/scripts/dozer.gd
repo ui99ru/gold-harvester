@@ -19,6 +19,15 @@ var _treads: Array[MeshInstance3D] = []
 var _tread_phase := 0.0
 var _blade_shapes: Array[CollisionShape3D] = []
 
+# B6: дозер строился ~59 отдельными MeshInstance3D → ~59 draw-calls (×2 с тенями).
+# Замер на телефоне: рендер кадра — draw-call-bound, дозер = крупнейший источник.
+# _optimize_draw_calls() пост-обработкой сливает статичные меши ОДНИМ мешем на
+# материал (SurfaceTool.append_from — та же геометрия, просто батч) и переводит
+# 10 траков в один MultiMesh (анимируются per-instance). Код постройки визуала
+# (калиброванные размеры/позы) НЕ трогаем — мержим уже готовые узлы.
+var _tread_mm: MultiMeshInstance3D
+var _tread_x := PackedFloat32Array()   # x каждого трак-инстанса (анимируем только z)
+
 # Материалы (web main.js:48-56)
 var _chassis_m := _std(CFG.DOZER_COLOR, 0.5, 0.2)
 var _deck_m := _std(Color("2c2a85"), 0.5, 0.2)
@@ -35,6 +44,7 @@ var _helmet := _std(Color("f2c01d"), 0.5, 0.0)
 func _ready() -> void:
 	_build_visual()
 	_build_bodies(blade_hx())
+	_optimize_draw_calls()  # B6: слить меши дозера (draw-call-bound рендер на телефоне)
 
 
 func blade_hx() -> float:
@@ -189,12 +199,90 @@ func rebuild_blade(hx: float) -> void:
 
 
 func anim_tracks(dt: float, speed_now: float) -> void:
-	# Прокрутка протектора (web main.js:355-358)
+	# Прокрутка протектора (web main.js:355-358). B6: треды теперь инстансы MultiMesh —
+	# обновляем per-instance transform (тот же z-скролл, что и у прежних узлов).
+	if _tread_mm == null:
+		return
 	_tread_phase += speed_now * dt
 	var ph := fposmod(_tread_phase, TREAD_SPAN)
-	for i in _treads.size():
+	var mm := _tread_mm.multimesh
+	for i in _tread_x.size():
 		var k := i % TREAD_N
-		_treads[i].position.z = TREAD_MIN + fposmod(k * TREAD_SP - ph, TREAD_SPAN)
+		var z := TREAD_MIN + fposmod(k * TREAD_SP - ph, TREAD_SPAN)
+		mm.set_instance_transform(i, Transform3D(Basis(), Vector3(_tread_x[i], 0.75, z)))
+
+
+# --- B6: батч рендера дозера (draw-call reduction) ---
+
+## Слить статичные меши по материалам + треды в MultiMesh. Зовётся ПОСЛЕ постройки
+## визуала/тел: код размеров/поз не трогаем, мержим готовые узлы. Геометрия и
+## материалы те же → картинка идентична (сверено before/after-диффом), draw-calls ~59→~10.
+func _optimize_draw_calls() -> void:
+	_build_tread_multimesh()         # 10 трак-узлов → 1 MultiMesh (треды освобождаются тут)
+	_merge_static(self)              # статика корпуса: 1 меш на материал
+	if blade_visual != null:
+		_merge_static(blade_visual)  # ковш отдельно: остаётся под blade_visual (масштаб НОЖа по x)
+
+
+## Треды (идентичные боксы, анимируются) → один MultiMesh. Узлы-треды удаляем.
+func _build_tread_multimesh() -> void:
+	if _treads.is_empty():
+		return
+	var n := _treads.size()
+	_tread_x.resize(n)
+	for i in n:
+		_tread_x[i] = _treads[i].position.x
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	var box := BoxMesh.new()
+	box.size = Vector3(0.5, 0.09, 0.32)   # = размер трака в _build_visual
+	mm.mesh = box
+	mm.instance_count = n
+	for i in n:
+		mm.set_instance_transform(i, _treads[i].transform)
+	_tread_mm = MultiMeshInstance3D.new()
+	_tread_mm.name = "Treads"
+	_tread_mm.multimesh = mm
+	_tread_mm.material_override = _tread_m
+	add_child(_tread_mm)
+	for mi in _treads:
+		mi.free()   # синхронно (в _ready) — чтобы _merge_static не подхватил их
+	_treads.clear()
+
+
+## Слить все прямые MeshInstance3D-дети container в один меш (одна поверхность на
+## материал) через SurfaceTool.append_from. Узлы-исходники удаляем. MultiMesh/тела/
+## под-узлы (blade_visual) пропускаются (не MeshInstance3D).
+func _merge_static(container: Node3D) -> void:
+	var groups := {}   # Material -> SurfaceTool (порядок вставки = порядок поверхностей)
+	var to_free: Array[Node] = []
+	for ch in container.get_children():
+		if not (ch is MeshInstance3D):
+			continue
+		var mi: MeshInstance3D = ch
+		if mi.mesh == null or mi.material_override == null:
+			continue
+		var mat: Material = mi.material_override
+		if not groups.has(mat):
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			groups[mat] = st
+		(groups[mat] as SurfaceTool).append_from(mi.mesh, 0, mi.transform)
+		to_free.append(mi)
+	if groups.is_empty():
+		return
+	var arr := ArrayMesh.new()
+	var idx := 0
+	for mat in groups:
+		(groups[mat] as SurfaceTool).commit(arr)
+		arr.surface_set_material(idx, mat)
+		idx += 1
+	var merged := MeshInstance3D.new()
+	merged.name = "Merged"
+	merged.mesh = arr
+	container.add_child(merged)
+	for mi in to_free:
+		mi.free()
 
 
 # --- Утилиты ---
