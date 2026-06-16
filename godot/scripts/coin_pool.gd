@@ -16,6 +16,13 @@ var spawn_resetters: Array[Callable] = []
 
 var _free: Array[RigidBody3D] = []
 
+# B6: список «в игре» (in_pool=false: активные + made_dormant). Сущности (ворота/пады/
+# трэш) поллят монеты КАЖДЫЙ тик — раньше шли по всем size() детям с meta-проверкой
+# (замер: цена тика — ~80% gd в этом цикле). Теперь поллят только _live (~cap, не 600).
+# Swap-remove по coin.live_idx → O(1). Итерировать через live_snapshot() (копия:
+# spawn/release во время прохода у ворот/трэша иначе портят коллекцию).
+var _live: Array[RigidBody3D] = []
+
 
 func setup(n: int, clink_cb: Callable) -> void:
 	size = n
@@ -47,6 +54,8 @@ func spawn(pos: Vector3, random_tilt := true) -> RigidBody3D:
 	coin.angular_velocity = Vector3.ZERO
 	coin.dormant = false     # O3: свежая монета — активная (dynamic)
 	coin._refresh_monitor()  # O5: свежеспавненная монета активна → монитор контактов on
+	coin.live_idx = _live.size()
+	_live.append(coin)       # B6: в список «в игре» для поллинга сущностями
 	for cb in spawn_resetters:
 		cb.call(coin.idx)    # чистый эдж-триггер ворот для этого слота (анти-фантом)
 	return coin
@@ -56,8 +65,27 @@ func release(coin: RigidBody3D) -> void:
 	if coin.get_meta("in_pool", false):
 		return
 	coin.set_meta("dead", true)
+	_live_remove(coin)
 	_park(coin)
 	_free.append(coin)
+
+
+## O(1) удаление из _live: последний элемент переносим в дырку, чиним его live_idx.
+func _live_remove(coin: RigidBody3D) -> void:
+	var i: int = coin.live_idx
+	if i < 0 or i >= _live.size() or _live[i] != coin:
+		return  # уже не в списке (защита от двойного release)
+	var last: RigidBody3D = _live[_live.size() - 1]
+	_live[i] = last
+	last.live_idx = i
+	_live.pop_back()
+	coin.live_idx = -1
+
+
+## Снимок «в игре» монет для безопасного поллинга сущностями (spawn/release во время
+## прохода не портят копию). Заметно дешевле прежнего обхода всех size() детей с meta.
+func live_snapshot() -> Array:
+	return _live.duplicate()
 
 
 func active_count() -> int:

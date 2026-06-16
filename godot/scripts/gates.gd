@@ -130,9 +130,7 @@ func step(_dt: float) -> void:
 		_step_active()
 		return
 	var cnt := 0
-	for coin in game.pool.get_children():
-		if coin.get_meta("in_pool", false):
-			continue  # O3: пропускаем только запаркованных пулом; dormant (статик, но в игре) — поллим
+	for coin in game.pool.live_snapshot():  # B6: только монеты «в игре» (~cap), не все size() с meta-проверкой
 		var p: Vector3 = coin.global_position
 		var gx: float = p.x - position.x
 		var gz: float = p.z - position.z
@@ -158,9 +156,7 @@ func step(_dt: float) -> void:
 ## самопроизвольного размножения нет. Сумма ценности точно x mult.
 func _step_active() -> void:
 	var crossed := 0
-	for coin in game.pool.get_children():
-		if coin.get_meta("in_pool", false):
-			continue  # O3: пропускаем только запаркованных пулом; dormant (статик, но в игре) — поллим
+	for coin in game.pool.live_snapshot():  # B6: только монеты «в игре» (~cap), не все size() с meta-проверкой
 		var p: Vector3 = coin.global_position
 		var gx: float = p.x - position.x
 		var gz: float = p.z - position.z

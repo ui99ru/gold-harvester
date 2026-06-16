@@ -24,6 +24,12 @@ var cap := 0
 var _phys_ema := 0.0
 var _cap_frozen := false
 var _cap_override := 0
+# B6 диагностика per-tick (--smoke-profile): usec по секциям sim_step, чтобы найти
+# фиксированную цену тика (кадр PHYSICS-bound). Включается только в профайл-смоуке.
+var _profile := false
+var _prof := {"dozer": 0, "bubble": 0, "hydrate": 0, "entities": 0, "bankui": 0}
+var _prof_ticks := 0
+var _prof_t := 0
 var heading := 0.0
 var driving := false
 var speed_now := 0.0
@@ -775,6 +781,8 @@ func _physics_process(delta: float) -> void:
 
 
 func sim_step(dt: float) -> void:
+	if _profile:
+		_prof_t = Time.get_ticks_usec()
 	sim_time += dt
 	if not is_nan(ctrl_desired):
 		var d := wrapf(ctrl_desired - heading, -PI, PI)
@@ -818,6 +826,9 @@ func sim_step(dt: float) -> void:
 	# против мерцания); зона направленная (вращается с курсом). reach ножа ~2 м,
 	# зона вперёд 6 м → монета оживает задолго до касания.
 	var _gd0 := Time.get_ticks_usec() if _smoke_mode == "stress" else 0
+	if _profile:
+		_prof["dozer"] += Time.get_ticks_usec() - _prof_t  # дозер/движение/грунт до bubble
+		_prof_t = Time.get_ticks_usec()
 	if Engine.get_physics_frames() % 10 == 0:
 		var dz := dozer.position
 		var sn2 := sin(heading)
@@ -860,10 +871,16 @@ func sim_step(dt: float) -> void:
 			elif p.y < 0.6 and coin.linear_velocity.length_squared() < 1.0:
 				if lz < -4.5 or lz > 7.5 or absf(lat) > bw + 3.2:
 					coin.make_dormant()      # осела вне зоны (с запасом) → спим
+	if _profile:
+		_prof["bubble"] += Time.get_ticks_usec() - _prof_t  # цикл дегидрации (раз/10 тиков)
+		_prof_t = Time.get_ticks_usec()
 	# B2 авто-бюджет активных тел (AIMD) → B1 гидрация держит active≈cap
 	_budget_tick()
 	# B1 ГИДРАЦИЯ (каждый тик, анти нож-призрак): dormant-записи у дозера → тела
 	_hydrate_pass()
+	if _profile:
+		_prof["hydrate"] += Time.get_ticks_usec() - _prof_t  # query_circle по dormant + подъём тел
+		_prof_t = Time.get_ticks_usec()
 	# Экономика (web stepEconomy; физика монет шагает движком после)
 	for gt in gates:
 		gt.step(dt)
@@ -871,7 +888,13 @@ func sim_step(dt: float) -> void:
 		pd.step(dt)
 	for tp in trash_pads:
 		tp.step(dt)
+	if _profile:
+		_prof["entities"] += Time.get_ticks_usec() - _prof_t  # ворота/пады/трэш
+		_prof_t = Time.get_ticks_usec()
 	_update_bank_ui()
+	if _profile:
+		_prof["bankui"] += Time.get_ticks_usec() - _prof_t
+		_prof_ticks += 1
 	if _smoke_mode == "stress":
 		_gd_accum += Time.get_ticks_usec() - _gd0  # GDScript-цена циклов O(N)/тик
 
@@ -1097,6 +1120,17 @@ func _setup_smoke() -> void:
 		dozer.position = Vector3(16, 0, 10)
 		_loop_dir = 1
 		_script_target = Vector3(16, 0, 18)
+	elif _smoke_mode == "profile":
+		# B6 диагностика: 3000 dormant + дозер-челнок через ворота (как probe), но с
+		# посекционным таймингом sim_step → найти фиксированную цену тика (кадр PHYSICS-bound).
+		_profile = true
+		_cap_frozen = true
+		_cap_override = 100
+		cap = 100
+		seed_dormant(3000)
+		dozer.position = Vector3(0, 0, 8)
+		_loop_dir = 1
+		_script_target = Vector3(0, 0, 18)
 
 
 func _descendants(n: Node) -> int:
@@ -1143,6 +1177,32 @@ func _smoke_tick() -> void:
 		print("SMOKE lod: %s dormant_segs=%d active_segs=%d cheap_mat=%s shadow_off=%s dozer_meshes=%d" % [
 			"OK" if ok else "FAIL", dsegs, asegs, cheap_mat, shadow_off, dozer_mi])
 		get_tree().quit(0 if ok else 1)
+		return
+	if _smoke_mode == "profile":
+		# Челнок дозера через зону монет; после прогрева печатаем посекционный тайминг.
+		var fz := 18.0 if not gates[0].active else 38.0
+		if _loop_dir == 1 and dozer.position.z > fz - 1.5:
+			_loop_dir = -1; _script_target = Vector3(0, 0, 6)
+		elif _loop_dir == -1 and dozer.position.z < 7.5:
+			_loop_dir = 1; _script_target = Vector3(0, 0, fz)
+		if _smoke_ticks == 120:  # сброс аккумуляторов после стартового прогрева
+			for k in _prof: _prof[k] = 0
+			_prof_ticks = 0
+			_phys_accum = 0
+		if _smoke_ticks > 120:
+			_phys_accum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+		if _smoke_ticks >= 720:  # ~10 c измерения
+			var n := maxi(1, _prof_ticks)
+			var gd_total := 0.0
+			for k in _prof: gd_total += _prof[k]
+			var phys := 1000.0 * _phys_accum / 600.0   # мс/тик (TIME_PHYSICS_PROCESS)
+			var gd := 0.001 * gd_total / n               # мс/тик GDScript (сумма секций)
+			print("SMOKE profile: phys=%.2f gd=%.2f jolt=%.2f ms/tick | dozer=%.3f bubble=%.3f hydrate=%.3f entities=%.3f bankui=%.3f (мс/тик) active=%d dormant=%d" % [
+				phys, gd, phys - gd,
+				0.001 * _prof["dozer"] / n, 0.001 * _prof["bubble"] / n,
+				0.001 * _prof["hydrate"] / n, 0.001 * _prof["entities"] / n,
+				0.001 * _prof["bankui"] / n, pool.active_count(), _dormant.count()])
+			get_tree().quit(0)
 		return
 	if _smoke_mode == "idle":
 		# Сцена «как на телефоне»: старт (5 монет, 995 в пуле), дозер стоит.
@@ -1481,7 +1541,7 @@ func _budget_tick() -> void:
 	if Engine.get_physics_frames() % 30 != 0:
 		return
 	if _phys_ema > CFG.BUDGET_TARGET_MS:
-		cap = maxi(100, int(cap * 0.9))
+		cap = maxi(CFG.CAP_FLOOR, int(cap * 0.9))
 	elif _phys_ema < CFG.BUDGET_TARGET_MS * 0.7:
 		cap = mini(pool.size, cap + 25)
 

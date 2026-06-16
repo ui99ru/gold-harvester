@@ -24,6 +24,7 @@ const FLATTEN_K := 8.0
 @export var calm_flatten := true
 
 var idx := -1                              # стабильный индекс в пуле (side-массивы ворот)
+var live_idx := -1                         # позиция в pool._live (swap-remove O(1)); -1 = запаркована
 var worth := 1                             # ценность; множится воротами
 
 # Вызывается main'ом: (global_pos: Vector3, strength: float 0..1)
