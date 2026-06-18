@@ -11,7 +11,7 @@ refs/      out/        out/cmp_*.png    index.html
 
 ### 1. Корпус эталонов (один раз)
 ```
-bash tools/extract.sh          # demo.mp4 -> refs/frames/*, refs/contact.png
+bash tools/extract.sh          # refs/demo.mp4 -> refs/frames/*, refs/contact.png
 ```
 Фазы размечены в `refs/phases.md`. Целевая фаза — **B (геймплей)**. Канонические мишени — `refs/keyframes/kf_{establish,hill,spread,pad}.png`.
 

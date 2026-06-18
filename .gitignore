@@ -4,7 +4,7 @@ node_modules/
 out/
 dist/
 
-# Корпус кадров (тяжёлый, восстанавливается из demo.mp4 через tools/extract.sh)
+# Корпус кадров (тяжёлый, восстанавливается из refs/demo.mp4 через tools/extract.sh)
 refs/frames/
 refs/strip_sec.png
 
