@@ -3,7 +3,7 @@ name: build-android
 on:
   push:
     tags: ['v*']
-    branches: ['xp/godot']
+    branches: ['main']
   workflow_dispatch:
 
 env:

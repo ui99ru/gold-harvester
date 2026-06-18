@@ -7,7 +7,7 @@ name: perf-smoke
 
 on:
   push:
-    branches: ['claude/asmr-gameplay-direction-ihmv2x', 'xp/godot']
+    branches: ['main']
   workflow_dispatch:
 
 jobs:
