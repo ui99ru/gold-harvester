@@ -102,6 +102,8 @@ var _ovr_msaa := -1        # --no-msaa → 0 (MSAA off); -1 = дефолт пр�
 var _ovr_shadow := -1      # --no-shadow → 0 (тень солнца off); -1 = дефолт (on)
 var _ovr_scale := 0.0      # --render-scale=X → scaling_3d_scale; 0 = дефолт (нативное)
 var _ovr_glow := -1        # --no-glow → 0 (bloom off); -1 = дефолт (on)
+var _ovr_shadow_size := 0  # --shadow-size=N → размер атласа теней солнца (0 = дефолт проекта 2048)
+var _ovr_glow_lv := ""     # --glow-levels=a,b,..,g → интенсивности 7 glow-уровней (пусто = дефолт Godot 3+5)
 var _gd_accum := 0
 var _sim_us_last := 0   # мкс GDScript-сима за последний физ-тик → split «jolt/gd» в HUD
 var _coin_mm: MultiMeshInstance3D   # общий рендер монет (как web InstancedMesh), инстанс = coin.idx
@@ -174,6 +176,14 @@ func _apply_render_overrides() -> void:
 	if _ovr_scale > 0.0:
 		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		vp.scaling_3d_scale = _ovr_scale
+	if _ovr_shadow_size > 0:
+		# Меньше разрешение теневого атласа → дешевле теневой проход (fill).
+		RenderingServer.directional_shadow_atlas_set_size(_ovr_shadow_size, true)
+	if _ovr_glow_lv != "" and world_env:
+		# A/B числа уровней glow: меньше/ниже активных уровней = меньше downsample-проходов.
+		var parts := _ovr_glow_lv.split(",")
+		for i in mini(parts.size(), 7):
+			world_env.set_glow_level(i, float(parts[i]))
 
 
 ## Респаун монеты в источнике: у земли + радиальный разлёт «волной». Монеты
@@ -471,6 +481,10 @@ func _parse_user_args() -> void:
 			_ovr_glow = 0    # B6 A/B: замер вклада bloom (работает и на Android — baked args)
 		elif arg.begins_with("--render-scale="):
 			_ovr_scale = float(arg.get_slice("=", 1))  # B6 A/B: рендер-скейл 3D (fill-rate)
+		elif arg.begins_with("--shadow-size="):
+			_ovr_shadow_size = int(arg.get_slice("=", 1))  # B6 A/B: размер теневого атласа (fill теневого прохода)
+		elif arg.begins_with("--glow-levels="):
+			_ovr_glow_lv = arg.get_slice("=", 1)  # B6 A/B: 7 интенсивностей glow (дешевле = меньше активных уровней)
 		elif arg.begins_with("--cal="):
 			var c := arg.get_slice("=", 1).split(",")
 			_cal_sun = float(c[0])
